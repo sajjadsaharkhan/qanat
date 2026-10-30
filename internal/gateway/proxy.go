@@ -21,7 +21,7 @@ import (
 )
 
 // defaultBaseURL per provider; an account's base_url overrides it.
-var defaultBaseURL = map[string]string{"claude": "https://api.anthropic.com"}
+var defaultBaseURL = map[string]string{"claude": "https://api.anthropic.com", "antigravity": oauth.AntigravityAPIURL}
 
 // Request headers never forwarded upstream: hop-by-hop, the caller's Qanat
 // key (it must never reach a provider), cookies, and client network details.
@@ -111,6 +111,25 @@ func (g *Gateway) coolDown(a *Account, resp *http.Response) {
 	g.mu.Unlock()
 }
 
+// requestRefresh benches an OAuth account that answered 401 and asks the
+// control plane to refresh its token now (REQ-OAUTH-03); the refreshed token
+// arrives with the next snapshot reload.
+func (g *Gateway) requestRefresh(a *Account) {
+	g.mu.Lock()
+	g.cooldown[a.ID] = time.Now().Add(30 * time.Second)
+	g.mu.Unlock()
+	if g.pg == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if _, err := g.pg.Exec(ctx, "SELECT pg_notify($1, $2)", oauth.RefreshChannel, a.ID); err != nil {
+			g.log.Warn("can't request oauth refresh", "account", a.ID, "err", err)
+		}
+	}()
+}
+
 var errNoRoute = errors.New("no healthy proxy")
 
 func retryable(status int) bool {
@@ -157,6 +176,15 @@ func (g *Gateway) forward(w http.ResponseWriter, r *http.Request, rt *route, o f
 			}
 			if err != nil {
 				upstreamErrors.WithLabelValues(m.Provider, a.ID, "connect").Inc()
+				continue
+			}
+			if resp.StatusCode == http.StatusUnauthorized && a.AuthKind == "oauth" {
+				// An expired or revoked sign-in: nothing reached the client,
+				// so fail over and have the control plane refresh it.
+				g.requestRefresh(a)
+				upstreamErrors.WithLabelValues(m.Provider, a.ID, "unauthorized").Inc()
+				io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+				resp.Body.Close()
 				continue
 			}
 			if retryable(resp.StatusCode) {
@@ -212,6 +240,9 @@ func (g *Gateway) bindSticky(rt *route, provider, accountID string) {
 // the client's context so a disconnect cancels it immediately
 // (REQ-PERF-03).
 func (g *Gateway) send(r *http.Request, a *Account, sp *proxy.Spec, body []byte) (*http.Response, error) {
+	if a.Provider == "antigravity" {
+		return g.sendAntigravity(r, a, sp, body)
+	}
 	url := strings.TrimSuffix(a.baseURL(), "/") + r.URL.Path
 	if r.URL.RawQuery != "" {
 		url += "?" + r.URL.RawQuery

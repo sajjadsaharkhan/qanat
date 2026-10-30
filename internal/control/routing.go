@@ -430,7 +430,7 @@ func (s *Server) validateAccount(w http.ResponseWriter, r *http.Request, _ *db.G
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	req2, err := upstreamProbe(ctx, req.Provider, req.AuthKind, req.AccessToken, base)
+	req2, err := upstreamProbe(ctx, req.Provider, req.AuthKind, req.AccessToken, "", base)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -455,8 +455,17 @@ func (s *Server) validateAccount(w http.ResponseWriter, r *http.Request, _ *db.G
 // credential is accepted. Claude OAuth tokens are probed on the usage
 // endpoint the CLI itself uses — a Messages call would depend on a model
 // name that subscription auth may not serve (and costs tokens); API keys
-// list the models. Codex and antigravity list their models.
-func upstreamProbe(ctx context.Context, providerID, authKind, token, base string) (*http.Request, error) {
+// list the models. Codex and antigravity list their models; Antigravity OAuth
+// accounts ask Cloud Code for their project, as the IDE does on start, and
+// Codex OAuth accounts list the CLI's models. accountID is a Codex sign-in's
+// ChatGPT account.
+func upstreamProbe(ctx context.Context, providerID, authKind, token, accountID, base string) (*http.Request, error) {
+	switch {
+	case providerID == "antigravity" && authKind == "oauth":
+		return oauth.LoadCodeAssistRequest(ctx, token)
+	case providerID == "codex" && authKind == "oauth":
+		return oauth.CodexModelsRequest(ctx, token, accountID)
+	}
 	switch providerID {
 	case "claude":
 		var (
@@ -522,9 +531,7 @@ func (s *Server) testAccount(w http.ResponseWriter, r *http.Request, actor *db.G
 		fail(w, http.StatusConflict, "credentials_unreadable", "The stored credential can't be read with the current master key. Save the credential again.")
 		return
 	}
-	var creds struct {
-		AccessToken string `json:"access_token"`
-	}
+	var creds oauth.Credentials
 	if err := json.Unmarshal(plain, &creds); err != nil || creds.AccessToken == "" {
 		fail(w, http.StatusConflict, "credentials_unreadable", "The stored credential can't be read with the current master key. Save the credential again.")
 		return
@@ -539,7 +546,7 @@ func (s *Server) testAccount(w http.ResponseWriter, r *http.Request, actor *db.G
 	if base == "" {
 		base = testUpstreamBase[a.Provider]
 	}
-	probe, err := upstreamProbe(ctx, a.Provider, a.AuthKind, creds.AccessToken, base)
+	probe, err := upstreamProbe(ctx, a.Provider, a.AuthKind, creds.AccessToken, creds.AccountID, base)
 	if err != nil {
 		s.internal(w, r, err)
 		return

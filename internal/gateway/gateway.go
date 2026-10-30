@@ -334,6 +334,9 @@ func (g *Gateway) models(w http.ResponseWriter, r *http.Request) {
 
 // persistSticky records a new binding in the background (REQ-POOL-04).
 func (g *Gateway) persistSticky(userID, provider, accountID string) {
+	if g.pg == nil { // unit tests run without a database
+		return
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

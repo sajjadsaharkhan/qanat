@@ -123,6 +123,35 @@ func (q *Queries) DeleteOldUsage5m(ctx context.Context) (int64, error) {
 	return result.RowsAffected(), nil
 }
 
+const dueOAuthAccounts = `-- name: DueOAuthAccounts :many
+SELECT id FROM provider_accounts
+WHERE auth_kind = 'oauth' AND credentials IS NOT NULL AND disabled_at IS NULL
+  AND state <> 'disconnected' AND expires_at IS NOT NULL AND expires_at < $1
+ORDER BY expires_at
+`
+
+// OAuth token refresh (REQ-OAUTH-03): accounts whose access token expires
+// before $1. Accounts a failed refresh disconnected wait for a new sign-in.
+func (q *Queries) DueOAuthAccounts(ctx context.Context, expiresAt *time.Time) ([]string, error) {
+	rows, err := q.db.Query(ctx, dueOAuthAccounts, expiresAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const findOAuthAccount = `-- name: FindOAuthAccount :many
 SELECT id FROM provider_accounts
 WHERE provider = $1 AND email = $2 AND email <> '' AND auth_kind = 'oauth'
@@ -159,7 +188,8 @@ func (q *Queries) FindOAuthAccount(ctx context.Context, arg FindOAuthAccountPara
 
 const getAccountAdmin = `-- name: GetAccountAdmin :one
 SELECT id, provider, label, base_url, credentials, state, cooldown_until,
-       auth_kind, expires_at, disabled_at, proxy_id, proxy_group_id, proxy_direct
+       auth_kind, expires_at, disabled_at, proxy_id, proxy_group_id, proxy_direct,
+       last_refresh_at
 FROM provider_accounts
 WHERE id = $1
 `
@@ -178,6 +208,7 @@ type GetAccountAdminRow struct {
 	ProxyID       *string
 	ProxyGroupID  *string
 	ProxyDirect   bool
+	LastRefreshAt *time.Time
 }
 
 func (q *Queries) GetAccountAdmin(ctx context.Context, id string) (GetAccountAdminRow, error) {
@@ -197,6 +228,7 @@ func (q *Queries) GetAccountAdmin(ctx context.Context, id string) (GetAccountAdm
 		&i.ProxyID,
 		&i.ProxyGroupID,
 		&i.ProxyDirect,
+		&i.LastRefreshAt,
 	)
 	return i, err
 }
@@ -640,6 +672,57 @@ func (q *Queries) SetAccountProxy(ctx context.Context, arg SetAccountProxyParams
 		arg.ProxyID,
 		arg.ProxyGroupID,
 		arg.ProxyDirect,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setOAuthRefreshFailed = `-- name: SetOAuthRefreshFailed :exec
+UPDATE provider_accounts
+SET last_refresh_at = $2, last_refresh_error = $3,
+    state = CASE WHEN $4::boolean THEN 'disconnected' ELSE state END
+WHERE id = $1
+`
+
+type SetOAuthRefreshFailedParams struct {
+	ID               string
+	LastRefreshAt    *time.Time
+	LastRefreshError *string
+	Disconnect       bool
+}
+
+func (q *Queries) SetOAuthRefreshFailed(ctx context.Context, arg SetOAuthRefreshFailedParams) error {
+	_, err := q.db.Exec(ctx, setOAuthRefreshFailed,
+		arg.ID,
+		arg.LastRefreshAt,
+		arg.LastRefreshError,
+		arg.Disconnect,
+	)
+	return err
+}
+
+const setOAuthRefreshed = `-- name: SetOAuthRefreshed :execrows
+UPDATE provider_accounts
+SET credentials = $2, expires_at = $3, last_refresh_at = $4, last_refresh_error = NULL,
+    state = CASE WHEN state = 'disconnected' THEN 'healthy' ELSE state END
+WHERE id = $1 AND auth_kind = 'oauth'
+`
+
+type SetOAuthRefreshedParams struct {
+	ID            string
+	Credentials   []byte
+	ExpiresAt     *time.Time
+	LastRefreshAt *time.Time
+}
+
+func (q *Queries) SetOAuthRefreshed(ctx context.Context, arg SetOAuthRefreshedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setOAuthRefreshed,
+		arg.ID,
+		arg.Credentials,
+		arg.ExpiresAt,
+		arg.LastRefreshAt,
 	)
 	if err != nil {
 		return 0, err

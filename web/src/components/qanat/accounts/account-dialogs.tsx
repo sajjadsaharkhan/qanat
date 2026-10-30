@@ -3,11 +3,11 @@
  * src/app/(dashboard)/dashboard/providers/[id]/AddApiKeyModal.js and
  * src/shared/components/OAuthModal.js.
  * MIT License, Copyright (c) 2024-2026 decolua and contributors. See LICENSE-9router.
- * Qanat change: Claude signs in through its own OAuth flow (OAuthSignIn here,
- * relayed by the /callback page) or takes an API key / `claude setup-token`
- * token; Codex and Antigravity take an API key until their flows land. The
- * Check button calls the API's validate endpoint, and credentials are sealed
- * with the master key on save.
+ * Qanat change: Claude, Codex and Antigravity sign in through their own OAuth
+ * flows (OAuthSignIn here, relayed by the /callback page; Codex's fixed
+ * loopback redirect is pasted instead) or take an API key; Claude also takes a
+ * `claude setup-token` token. The Check button calls the API's validate
+ * endpoint, and credentials are sealed with the master key on save.
  */
 "use client";
 
@@ -28,6 +28,37 @@ import { api, errorMessage, fetchClient, type Schemas } from "@/lib/api/client";
 
 type Account = Schemas["Account"];
 type AuthKind = "oauth" | "token" | "api_key";
+type ProviderID = Schemas["Provider"];
+
+/** Providers with a sign-in flow, and whose account the button signs in with ("" = the provider's own). */
+const signInWith: Partial<Record<string, string>> = { claude: "", codex: "ChatGPT", antigravity: "Google" };
+
+/**
+ * Providers whose client only accepts its own loopback redirect (Codex CLI's
+ * localhost:1455), so the browser can't come back to /callback: the admin
+ * pastes the address the sign-in lands on.
+ */
+const pasteOnly = new Set(["codex"]);
+
+/** Credential kinds offered per provider, in menu order. */
+const kindOptions: Partial<Record<string, { value: AuthKind; label: string }[]>> = {
+  claude: [
+    { value: "oauth", label: "Claude subscription (Pro/Max) — sign in" },
+    { value: "api_key", label: "API key (console.anthropic.com)" },
+    { value: "token", label: "Claude Code token (`claude setup-token`)" },
+  ],
+  codex: [
+    { value: "oauth", label: "ChatGPT subscription (Codex) — sign in" },
+    { value: "api_key", label: "API key (platform.openai.com)" },
+  ],
+  antigravity: [
+    { value: "oauth", label: "Google account (Antigravity) — sign in" },
+    { value: "api_key", label: "Gemini API key (aistudio.google.com)" },
+  ],
+};
+
+const hasSignIn = (provider: string) => signInWith[provider] !== undefined;
+const defaultKind = (provider: string): AuthKind => (hasSignIn(provider) ? "oauth" : "api_key");
 
 function ProxyField({
   value,
@@ -80,10 +111,12 @@ function callbackRedirectUri(): string {
 /*
  * OAuthSignIn ports 9router's OAuthModal: it asks the API for the provider's
  * authorize URL, opens it in a popup, and waits for the /callback page to
- * relay the code. The paste field covers remote dashboards and blocked
- * popups. Codex's port-1455 capture and poll arrive with that flow (OA2).
+ * relay the code. The paste field covers remote dashboards, blocked popups
+ * and Codex, whose redirect never reaches this dashboard.
  */
 function OAuthSignIn({ provider, providerName, onDone }: { provider: string; providerName: string; onDone: () => void }) {
+  const identity = signInWith[provider] || providerName;
+  const paste = pasteOnly.has(provider);
   const qc = useQueryClient();
   const { mutate: exchangeMutate, isPending: exchanging, error: exchangeError } = api.useMutation(
     "post",
@@ -97,7 +130,7 @@ function OAuthSignIn({ provider, providerName, onDone }: { provider: string; pro
   const connect = useCallback(
     (code: string, state: string, redirectUri: string) => {
       exchangeMutate(
-        { params: { path: { provider: provider as "claude" } }, body: { code, state, redirect_uri: redirectUri } },
+        { params: { path: { provider: provider as ProviderID } }, body: { code, state, redirect_uri: redirectUri } },
         {
           onSuccess: (res) => {
             qc.invalidateQueries({ queryKey: ["get", "/api/admin/accounts"] });
@@ -143,7 +176,7 @@ function OAuthSignIn({ provider, providerName, onDone }: { provider: string; pro
     setStarting(true);
     try {
       const { data, error } = await fetchClient.GET("/api/admin/accounts/oauth/{provider}/authorize", {
-        params: { path: { provider: provider as "claude" }, query: { redirect_uri: redirectUri } },
+        params: { path: { provider: provider as ProviderID }, query: { redirect_uri: redirectUri } },
       });
       if (error) {
         toast.error(errorMessage(error));
@@ -183,19 +216,26 @@ function OAuthSignIn({ provider, providerName, onDone }: { provider: string; pro
         Signs in through {providerName}&apos;s own OAuth flow — the same one the official client uses. The tokens are sealed with the master
         key and refreshed by Qanat.
       </p>
-      {pending ? (
+      {pending && paste ? (
+        <p className="text-sm text-muted-foreground">
+          Complete the sign-in in the popup. It ends on a <code className="font-mono">localhost:1455</code> page that won&apos;t load — that&apos;s
+          expected. Copy that page&apos;s full address and paste it below.
+        </p>
+      ) : pending ? (
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 aria-hidden className="size-4 animate-spin" /> Waiting for {providerName}… complete the sign-in in the popup.
+          <Loader2 aria-hidden className="size-4 animate-spin" /> Waiting for {identity}… complete the sign-in in the popup.
         </p>
       ) : null}
       <Button type="button" onClick={start} disabled={starting || exchanging} className="self-start">
         {starting ? <Loader2 aria-hidden className="me-1.5 size-4 animate-spin" /> : <ExternalLink aria-hidden className="me-1.5 size-4" />}
-        Sign in with {providerName}
+        Sign in with {identity}
       </Button>
       {pending && (
         <div className="flex flex-col gap-2 rounded-lg border px-3 py-2.5">
           <p className="text-xs text-muted-foreground">
-            On another machine, or the popup was blocked? Open this URL yourself, then paste the address it redirects to.
+            {paste
+              ? "Popup blocked? Open this URL yourself, sign in, then paste the address it redirects to."
+              : "On another machine, or the popup was blocked? Open this URL yourself, then paste the address it redirects to."}
           </p>
           <div className="flex items-center gap-2">
             <Button type="button" variant="outline" size="sm" onClick={() => navigator.clipboard.writeText(pending.authUrl)}>
@@ -250,7 +290,7 @@ export function AddAccountDialog({
   const create = api.useMutation("post", "/api/admin/accounts");
   const check = api.useMutation("post", "/api/admin/accounts/validate");
 
-  const [kind, setKind] = useState<AuthKind>(provider === "claude" ? "oauth" : "api_key");
+  const [kind, setKind] = useState<AuthKind>(defaultKind(provider));
   const [label, setLabel] = useState("");
   const [credential, setCredential] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
@@ -258,7 +298,7 @@ export function AddAccountDialog({
   const [proxy, setProxy] = useState("inherit");
 
   const reset = () => {
-    setKind(provider === "claude" ? "oauth" : "api_key");
+    setKind(defaultKind(provider));
     setLabel("");
     setCredential("");
     setBaseUrl("");
@@ -327,7 +367,7 @@ export function AddAccountDialog({
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSave} className="flex flex-col gap-4">
-          {provider === "claude" && (
+          {kindOptions[provider] && (
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="auth_kind">Credential kind</Label>
               <Select value={kind} onValueChange={(v) => { resetCheck(); setKind(v as AuthKind); }}>
@@ -335,14 +375,16 @@ export function AddAccountDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="oauth">Claude subscription (Pro/Max) — sign in</SelectItem>
-                  <SelectItem value="api_key">API key (console.anthropic.com)</SelectItem>
-                  <SelectItem value="token">Claude Code token (`claude setup-token`)</SelectItem>
+                  {kindOptions[provider]!.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
           )}
-          {provider === "claude" && kind === "oauth" ? (
+          {hasSignIn(provider) && kind === "oauth" ? (
             <OAuthSignIn
               provider={provider}
               providerName={providerName}

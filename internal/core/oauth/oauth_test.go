@@ -60,8 +60,8 @@ func TestBeginClaudeAuthorizeURL(t *testing.T) {
 }
 
 func TestBeginUnknownProvider(t *testing.T) {
-	if _, _, _, err := Begin("codex", "http://localhost:3000/callback"); err == nil {
-		t.Fatal("codex has no flow until OA2; want an error")
+	if _, _, _, err := Begin("openrouter", "http://localhost:3000/callback"); err == nil {
+		t.Fatal("openrouter has no flow; want an error")
 	}
 }
 

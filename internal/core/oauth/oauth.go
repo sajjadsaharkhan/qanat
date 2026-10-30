@@ -33,8 +33,15 @@ type Flow struct {
 	PKCE         bool
 	// CallbackPath is the redirect path the dashboard page listens on.
 	CallbackPath string
-	// AuthorizeExtra are appended to the authorize URL verbatim.
+	// RedirectURI, when set, is the only redirect the provider's client
+	// accepts (Codex's loopback port); it replaces the dashboard's /callback
+	// and the admin pastes the address the browser lands on.
+	RedirectURI string
+	// AuthorizeExtra are added to the authorize URL's query.
 	AuthorizeExtra url.Values
+	// AuthorizeSuffix is appended to the authorize URL as is (Claude's
+	// trailing "&code=true").
+	AuthorizeSuffix string
 	// ProfileURL, when set, is fetched after a successful exchange for
 	// optional identity metadata (the account email). Tests redirect it.
 	ProfileURL string
@@ -44,7 +51,7 @@ type Flow struct {
 
 	tokensEncoding  string // "json" or "form" for the exchange body
 	refreshEncoding string
-	refreshBody     func(clientID, refreshToken string) ([]byte, error)
+	refreshBody     func(f *Flow, refreshToken string) ([]byte, error)
 }
 
 // Tokens is what a flow yields. Email is "" when the flow doesn't provide one.
@@ -55,6 +62,12 @@ type Tokens struct {
 	ExpiresIn    int64 // seconds until AccessToken expires
 	Scope        string
 	Email        string
+	// ProjectID is the Cloud Code project an Antigravity account calls
+	// through; "" for other providers.
+	ProjectID string
+	// AccountID is the ChatGPT account (workspace) a Codex token is bound
+	// to; "" for other providers.
+	AccountID string
 }
 
 // UnrecoverableError marks failures only a fresh sign-in fixes
@@ -81,21 +94,26 @@ var claude = &Flow{
 	Scope:           "org:create_api_key user:profile user:inference",
 	PKCE:            true,
 	CallbackPath:    "/callback",
+	AuthorizeSuffix: "&code=true",
 	tokensEncoding:  "json",
 	refreshEncoding: "application/json",
-	refreshBody: func(clientID, refreshToken string) ([]byte, error) {
+	refreshBody: func(f *Flow, refreshToken string) ([]byte, error) {
 		return json.Marshal(map[string]string{
-			"grant_type": "refresh_token", "refresh_token": refreshToken, "client_id": clientID,
+			"grant_type": "refresh_token", "refresh_token": refreshToken, "client_id": f.ClientID,
 		})
 	},
 	ProfileURL: "https://api.anthropic.com/api/oauth/profile",
 }
 
-func init() { claude.PostExchange = fetchClaudeProfile }
+func init() {
+	claude.PostExchange = fetchClaudeProfile
+	antigravity.PostExchange = antigravitySetup
+	codex.PostExchange = codexIdentity
+}
 
 // flows maps provider ID to its flow; providers without an entry answer the
 // sign-in endpoints with a clear error until their milestone lands.
-var flows = map[string]*Flow{"claude": claude}
+var flows = map[string]*Flow{"claude": claude, "codex": codex, "antigravity": antigravity}
 
 // HasFlow reports whether a provider's sign-in flow is implemented.
 func HasFlow(providerID string) bool { _, ok := flows[providerID]; return ok }
@@ -120,11 +138,16 @@ type Pending struct {
 }
 
 // Begin starts a sign-in: it returns the URL to open, the state to key the
-// pending attempt by, and the pending to keep until the exchange.
+// pending attempt by, and the pending to keep until the exchange. A flow with
+// a fixed RedirectURI uses that instead of redirectURI; p.RedirectURI is the
+// one in effect.
 func Begin(providerID, redirectURI string) (authURL, state string, p *Pending, err error) {
 	f, ok := flows[providerID]
 	if !ok {
 		return "", "", nil, fmt.Errorf("no sign-in flow for provider %q", providerID)
+	}
+	if f.RedirectURI != "" {
+		redirectURI = f.RedirectURI
 	}
 	state, err = randomHex(32)
 	if err != nil {
@@ -153,7 +176,7 @@ func Begin(providerID, redirectURI string) (authURL, state string, p *Pending, e
 	if f.Scope != "" {
 		q.Set("scope", f.Scope)
 	}
-	return f.AuthorizeURL + "?" + q.Encode() + "&code=true", state, p, nil
+	return f.AuthorizeURL + "?" + q.Encode() + f.AuthorizeSuffix, state, p, nil
 }
 
 // Exchange swaps the authorization code for tokens. The code may carry the
@@ -199,11 +222,11 @@ func (f *Flow) Exchange(ctx context.Context, hc *http.Client, code, state, redir
 	return t, nil
 }
 
-// Refresh trades a refresh token for fresh tokens (OA3 uses this on 401 and
-// on the background sweep). The provider may rotate the refresh token; the
-// caller must persist the returned one.
+// Refresh trades a refresh token for fresh tokens (the control plane's
+// refresher calls it before expiry and after a 401). The provider may rotate
+// the refresh token; an empty one in the result means "keep the old one".
 func (f *Flow) Refresh(ctx context.Context, hc *http.Client, refreshToken string) (*Tokens, error) {
-	body, err := f.refreshBody(f.ClientID, refreshToken)
+	body, err := f.refreshBody(f, refreshToken)
 	if err != nil {
 		return nil, err
 	}
@@ -340,6 +363,52 @@ func randomVerifier() (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// RefreshLead is how long before expiry an access token is refreshed
+// (9router's refreshLeadMs).
+const RefreshLead = 5 * time.Minute
+
+// RefreshChannel is the Postgres NOTIFY channel the gateway uses to ask the
+// control plane for an immediate refresh; the payload is the account ID.
+const RefreshChannel = "qanat_oauth_refresh"
+
+// Credentials is the sealed plaintext of an OAuth account. access_token
+// stays the first key so the gateway's credential reader opens these
+// accounts unchanged.
+type Credentials struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token,omitempty"`
+	IDToken      string `json:"id_token,omitempty"`
+	ProjectID    string `json:"project_id,omitempty"`
+	AccountID    string `json:"chatgpt_account_id,omitempty"`
+}
+
+// CredentialsFrom is the credential set a sign-in yields.
+func CredentialsFrom(t *Tokens) Credentials {
+	return Credentials{AccessToken: t.AccessToken, RefreshToken: t.RefreshToken, IDToken: t.IDToken, ProjectID: t.ProjectID, AccountID: t.AccountID}
+}
+
+// Upstream is the provider-side scope a request runs in: Antigravity's Cloud
+// Code project or Codex's ChatGPT account; "" for Claude.
+func (c Credentials) Upstream() string {
+	if c.ProjectID != "" {
+		return c.ProjectID
+	}
+	return c.AccountID
+}
+
+// Refreshed folds a refresh result into the stored set: refresh and ID
+// tokens the provider didn't rotate, the project and the account, are kept.
+func (c Credentials) Refreshed(t *Tokens) Credentials {
+	c.AccessToken = t.AccessToken
+	if t.RefreshToken != "" {
+		c.RefreshToken = t.RefreshToken
+	}
+	if t.IDToken != "" {
+		c.IDToken = t.IDToken
+	}
+	return c
 }
 
 // PendingTTL bounds a sign-in attempt (9router's OAUTH_TIMEOUT is 5 min; the

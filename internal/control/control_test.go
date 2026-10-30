@@ -558,7 +558,7 @@ func TestAccounts_KindsPatchTestMove(t *testing.T) {
 	// Test button: the stub upstream checks the header shape per auth kind.
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if r.URL.Path != "/v1/messages" && r.URL.Path != "/v1/models" {
+		if r.URL.Path != "/v1/messages" && r.URL.Path != "/v1/models" && r.URL.Path != "/api/oauth/usage" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}

@@ -96,9 +96,7 @@ func (s *Server) fetchProviderCatalog(r *http.Request, providerID string) (model
 	if err != nil {
 		return nil, "The stored credential can't be read with the current master key. Save the credential again.", http.StatusConflict
 	}
-	var creds struct {
-		AccessToken string `json:"access_token"`
-	}
+	var creds oauth.Credentials
 	if err := json.Unmarshal(plain, &creds); err != nil || creds.AccessToken == "" {
 		return nil, "The stored credential can't be read with the current master key. Save the credential again.", http.StatusConflict
 	}
@@ -109,7 +107,7 @@ func (s *Server) fetchProviderCatalog(r *http.Request, providerID string) (model
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	req, err := modelsProbe(ctx, providerID, admin.AuthKind, creds.AccessToken, base)
+	req, err := modelsProbe(ctx, providerID, admin.AuthKind, creds.AccessToken, creds.Upstream(), base)
 	if err != nil {
 		return nil, "", http.StatusInternalServerError
 	}
@@ -126,7 +124,7 @@ func (s *Server) fetchProviderCatalog(r *http.Request, providerID string) (model
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, upstreamErrorMessage(resp.StatusCode, body), http.StatusBadGateway
 	}
-	models, err = parseModelCatalog(providerID, body)
+	models, err = parseModelCatalog(providerID, admin.AuthKind, body)
 	if err != nil {
 		return nil, "The provider's model list couldn't be read: " + err.Error(), http.StatusBadGateway
 	}
@@ -134,12 +132,19 @@ func (s *Server) fetchProviderCatalog(r *http.Request, providerID string) (model
 }
 
 // modelsProbe builds the provider's own models-list request for a credential.
-func modelsProbe(ctx context.Context, providerID, authKind, token, base string) (*http.Request, error) {
+// upstream is the Cloud Code project of an Antigravity OAuth account or the
+// ChatGPT account of a Codex one.
+func modelsProbe(ctx context.Context, providerID, authKind, token, upstream, base string) (*http.Request, error) {
 	base = strings.TrimSuffix(base, "/")
 	var req *http.Request
 	var err error
-	switch providerID {
-	case "antigravity":
+	switch {
+	case providerID == "codex" && authKind == "oauth":
+		req, err = oauth.CodexModelsRequest(ctx, token, upstream)
+	case providerID == "antigravity" && authKind == "oauth":
+		// The signed-in IDE's own model list, not the Gemini API's.
+		req, err = oauth.AvailableModelsRequest(ctx, token, upstream)
+	case providerID == "antigravity":
 		req, err = http.NewRequestWithContext(ctx, http.MethodGet, base+"/v1beta/models", nil)
 		if err == nil {
 			req.Header.Set("X-Goog-Api-Key", token)
@@ -166,9 +171,16 @@ func modelsProbe(ctx context.Context, providerID, authKind, token, base string) 
 
 // parseModelCatalog reads the provider's model IDs out of its list response:
 // Anthropic and OpenAI both use {"data":[{"id":…}]}, Google uses
-// {"models":[{"name":"models/…"}]}.
-func parseModelCatalog(providerID string, body []byte) ([]string, error) {
+// {"models":[{"name":"models/…"}]}, and Antigravity's IDE API keys its
+// models by ID.
+func parseModelCatalog(providerID, authKind string, body []byte) ([]string, error) {
 	var out []string
+	if providerID == "antigravity" && authKind == "oauth" {
+		return oauth.ParseAvailableModels(body)
+	}
+	if providerID == "codex" && authKind == "oauth" {
+		return oauth.ParseCodexModels(body)
+	}
 	if providerID == "antigravity" {
 		var wire struct {
 			Models []struct {

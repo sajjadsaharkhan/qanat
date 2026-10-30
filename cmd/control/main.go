@@ -78,6 +78,9 @@ func main() {
 	}
 	log.Info("admin api ready", "root_login", cfg.RootPassword != "")
 
+	// Provider OAuth token refresh (REQ-OAUTH-03).
+	go api.RunTokenRefresh(workerCtx)
+
 	mux := http.NewServeMux()
 	api.Register(mux)
 	platform.Health(mux, func(ctx context.Context) error {

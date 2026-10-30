@@ -108,6 +108,45 @@ func TestForward_FailoverToNextMember(t *testing.T) {
 	}
 }
 
+// REQ-OAUTH-03: an OAuth account answering 401 has an expired or revoked
+// token; the request fails over to the next account (nothing reached the
+// client) and the 401'd account sits out until its refresh lands.
+func TestForward_OAuth401FailsOver(t *testing.T) {
+	expired := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		io.WriteString(w, `{"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired."}}`)
+	}))
+	defer expired.Close()
+	ok := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"usage":{}}`)
+	}))
+	defer ok.Close()
+	s := &Snapshot{Gen: 1, accounts: map[string][]*Account{"claude": {
+		{ID: "a1", Provider: "claude", State: "healthy", AuthKind: "oauth", Token: "old", BaseURL: expired.URL, Origin: expired.URL, Proxies: []*proxy.Spec{nil}},
+		{ID: "a2", Provider: "claude", State: "healthy", AuthKind: "oauth", Token: "t2", BaseURL: ok.URL, Origin: ok.URL, Proxies: []*proxy.Spec{nil}},
+	}}, sticky: map[string]string{}}
+	g := newTestGateway()
+	g.health = proxy.NewHealth()
+	g.log = slog.New(slog.NewTextHandler(io.Discard, nil))
+	rt := &route{caller: &caller{snap: s, user: &User{ID: "u1"}, key: &Key{}, plan: &Plan{}}, name: "m", body: []byte(`{}`),
+		members: []Member{{Provider: "claude", Model: "m"}}}
+	g.sticky["u1|claude"] = "a1" // no persistence in this test; a1 goes first
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", nil)
+	g.forward(w, r, rt, forwardOpts{reqID: "r", start: time.Now(), remaining: -1})
+	if w.Code != 200 {
+		t.Fatalf("status %d: %s", w.Code, w.Body)
+	}
+	g.mu.Lock()
+	until := g.cooldown["a1"]
+	g.mu.Unlock()
+	if time.Until(until) <= 0 {
+		t.Fatal("the 401'd account must sit out until its refresh lands")
+	}
+}
+
 // §8.2 resolution order, loaded from the real schema: own proxy, then the
 // global default, then direct; "direct" overrides the default; a disabled
 // proxy blocks its accounts.

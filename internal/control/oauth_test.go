@@ -133,8 +133,8 @@ func TestOAuthSignInRejectedInputs(t *testing.T) {
 	if st := h.do(c, "GET", "/api/admin/accounts/oauth/claude/authorize?redirect_uri=https%3A%2F%2Fevil.example%2Fcallback", "", nil); st != 400 {
 		t.Fatalf("non-loopback redirect: %d", st)
 	}
-	if st := h.do(c, "GET", "/api/admin/accounts/oauth/codex/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A3000%2Fcallback", "", nil); st != 400 {
-		t.Fatalf("codex has no flow until OA2: %d", st)
+	if st := h.do(c, "GET", "/api/admin/accounts/oauth/openrouter/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A3000%2Fcallback", "", nil); st != 400 {
+		t.Fatalf("provider without a flow: %d", st)
 	}
 	if st := h.do(c, "POST", "/api/admin/accounts/oauth/claude/exchange",
 		`{"code":"x","state":"bogus","redirect_uri":"http://localhost:3000/callback"}`, nil); st != 400 {

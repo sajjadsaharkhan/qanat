@@ -4,10 +4,12 @@
  * Qanat change: this page only serves the admin accounts provider sign-in. It
  * relays the authorization code to the opener dialog (postMessage,
  * BroadcastChannel, then localStorage) and offers the URL for manual paste
- * when nothing is listening.
+ * when nothing is listening. It renders in the browser only: its content
+ * depends on the URL the provider redirected to, which the server never sees.
  */
 "use client";
 
+import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { CheckCircle2, Copy } from "lucide-react";
 
@@ -18,7 +20,6 @@ type Relay = { source: "qanat-oauth"; code: string; state: string };
 
 /** Reads code/state from the query, tolerating Claude's "#state" forms. */
 function readRelay(): Relay | null {
-  if (typeof window === "undefined") return null;
   const sp = new URLSearchParams(window.location.search);
   const code = sp.get("code") ?? "";
   let state = sp.get("state") ?? "";
@@ -30,7 +31,9 @@ function readRelay(): Relay | null {
   return { source: "qanat-oauth", code, state };
 }
 
-export default function OAuthCallbackPage() {
+export default dynamic(() => Promise.resolve(OAuthCallback), { ssr: false });
+
+function OAuthCallback() {
   const [relay] = useState(readRelay);
   const [copied, setCopied] = useState(false);
 
@@ -51,7 +54,7 @@ export default function OAuthCallbackPage() {
     } catch { /* storage unavailable */ }
   }, [relay]);
 
-  const url = typeof window === "undefined" ? "" : window.location.href;
+  const url = window.location.href;
 
   if (!relay) {
     return (

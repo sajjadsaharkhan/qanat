@@ -220,7 +220,7 @@ paths:
       summary: Start a provider sign-in — returns the authorize URL to open; the pending sign-in is kept server-side
       parameters:
         - { name: provider, in: path, required: true, schema: { $ref: "#/components/schemas/Provider" } }
-        - { name: redirect_uri, in: query, required: true, schema: { type: string, description: The dashboard's http://localhost:<port>/callback URL } }
+        - { name: redirect_uri, in: query, required: true, schema: { type: string, description: "The dashboard's http://localhost:<port>/callback URL. Codex ignores it: its client only accepts http://localhost:1455/auth/callback, returned as redirect_uri, and the admin pastes the address the sign-in lands on." } }
       responses:
         "200":
           description: The URL to open

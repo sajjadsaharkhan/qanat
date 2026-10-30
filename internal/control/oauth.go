@@ -14,8 +14,9 @@ import (
 
 // Provider OAuth sign-in (PRD §6.6, REQ-OAUTH-01), ported from 9router's
 // /api/oauth/[provider]/[action] (MIT): the dashboard asks for an authorize
-// URL, the provider redirects to the dashboard's /callback page, and that page
-// hands code+state to the exchange, which creates — or re-signs-in — the
+// URL, the provider redirects to the dashboard's /callback page (or, for
+// Codex, to the CLI's loopback port, whose address the admin pastes), and the
+// code+state go to the exchange, which creates — or re-signs-in — the
 // account with its tokens sealed.
 
 // oauthHTTPClient reaches the providers' token endpoints. Tests override the
@@ -68,7 +69,7 @@ func (s *Server) oauthAuthorize(w http.ResponseWriter, r *http.Request, actor *d
 	}
 	s.oauthPending[state] = oauthPendingEntry{pending: pending, userID: actor.ID, createdAt: now}
 	s.oauthMu.Unlock()
-	writeJSON(w, http.StatusOK, oauthAuthorizeResponse{AuthURL: authURL, State: state, RedirectURI: redirectURI})
+	writeJSON(w, http.StatusOK, oauthAuthorizeResponse{AuthURL: authURL, State: state, RedirectURI: pending.RedirectURI})
 }
 
 type oauthExchangeRequest struct {
@@ -179,21 +180,19 @@ func (s *Server) oauthExchange(w http.ResponseWriter, r *http.Request, actor *db
 	writeJSON(w, http.StatusCreated, oauthExchangeResult{ID: id, Merged: false})
 }
 
-// oauthCredentialsJSON is the sealed plaintext for an OAuth account. It keeps
-// the access_token key first so the gateway's existing credential reader can
-// open these accounts unchanged.
+// oauthCredentialsJSON is the sealed plaintext for a new OAuth account.
 func oauthCredentialsJSON(t *oauth.Tokens) []byte {
-	b, _ := json.Marshal(struct {
-		AccessToken  string `json:"access_token"`
-		RefreshToken string `json:"refresh_token,omitempty"`
-		IDToken      string `json:"id_token,omitempty"`
-	}{t.AccessToken, t.RefreshToken, t.IDToken})
+	b, _ := json.Marshal(oauth.CredentialsFrom(t))
 	return b
 }
 
 // validRedirectURI holds redirects to the dashboard's own callback page on a
-// loopback address — the shape the official clients use.
+// loopback address — the shape the official clients use. A flow with a fixed
+// redirect (Codex) ignores the dashboard's.
 func validRedirectURI(f *oauth.Flow, raw string) bool {
+	if f.RedirectURI != "" {
+		return true
+	}
 	u, err := url.Parse(raw)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Path != f.CallbackPath {
 		return false

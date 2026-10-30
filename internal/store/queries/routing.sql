@@ -10,7 +10,8 @@ ORDER BY position;
 
 -- name: GetAccountAdmin :one
 SELECT id, provider, label, base_url, credentials, state, cooldown_until,
-       auth_kind, expires_at, disabled_at, proxy_id, proxy_group_id, proxy_direct
+       auth_kind, expires_at, disabled_at, proxy_id, proxy_group_id, proxy_direct,
+       last_refresh_at
 FROM provider_accounts
 WHERE id = $1;
 
@@ -30,6 +31,26 @@ LIMIT 1;
 UPDATE provider_accounts
 SET credentials = $2, expires_at = $3, auth_kind = 'oauth', email = $4,
     state = 'healthy', cooldown_until = NULL, disabled_at = NULL
+WHERE id = $1;
+
+-- OAuth token refresh (REQ-OAUTH-03): accounts whose access token expires
+-- before $1. Accounts a failed refresh disconnected wait for a new sign-in.
+-- name: DueOAuthAccounts :many
+SELECT id FROM provider_accounts
+WHERE auth_kind = 'oauth' AND credentials IS NOT NULL AND disabled_at IS NULL
+  AND state <> 'disconnected' AND expires_at IS NOT NULL AND expires_at < $1
+ORDER BY expires_at;
+
+-- name: SetOAuthRefreshed :execrows
+UPDATE provider_accounts
+SET credentials = $2, expires_at = $3, last_refresh_at = $4, last_refresh_error = NULL,
+    state = CASE WHEN state = 'disconnected' THEN 'healthy' ELSE state END
+WHERE id = $1 AND auth_kind = 'oauth';
+
+-- name: SetOAuthRefreshFailed :exec
+UPDATE provider_accounts
+SET last_refresh_at = $2, last_refresh_error = $3,
+    state = CASE WHEN sqlc.arg(disconnect)::boolean THEN 'disconnected' ELSE state END
 WHERE id = $1;
 
 -- name: SetAccountProxy :execrows

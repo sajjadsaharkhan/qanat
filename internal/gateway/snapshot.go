@@ -99,10 +99,11 @@ type Account struct {
 	ID, Provider, BaseURL string
 	Origin                string // scheme://host of the upstream, for proxy health
 	Token                 string // decrypted access token; never logged
+	Project               string // Antigravity's Cloud Code project, from sign-in
 	State                 string
 	// AuthKind is how Token authenticates upstream: "token" sends
 	// Authorization: Bearer (e.g. a token from `claude setup-token`), "api_key"
-	// sends x-api-key. Only claude forwards today.
+	// sends x-api-key. Antigravity is always an OAuth bearer token.
 	AuthKind      string
 	Disabled      bool // disabled by an admin; sits out until re-enabled
 	CooldownUntil time.Time
@@ -474,7 +475,7 @@ func build(ctx context.Context, q *db.Queries, box *secretbox.Box, log *slog.Log
 			acct.CooldownUntil = *a.CooldownUntil
 		}
 		if len(a.Credentials) > 0 {
-			acct.Token, err = openToken(box, a.ID, a.Credentials)
+			acct.Token, acct.Project, err = openToken(box, a.ID, a.Credentials)
 			if err != nil {
 				log.Error("account credentials unreadable; skipping account", "account", a.ID, "err", err)
 				continue
@@ -511,21 +512,22 @@ type proxySetting struct {
 // Credentials is the sealed JSON stored in provider_accounts.credentials.
 type Credentials struct {
 	AccessToken string `json:"access_token"`
+	ProjectID   string `json:"project_id,omitempty"` // Antigravity only
 }
 
-func openToken(box *secretbox.Box, accountID string, sealed []byte) (string, error) {
+func openToken(box *secretbox.Box, accountID string, sealed []byte) (token, project string, err error) {
 	if box == nil {
-		return "", errNoMasterKey
+		return "", "", errNoMasterKey
 	}
 	plain, err := box.Open(sealed, []byte(accountID))
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	var c Credentials
 	if err := json.Unmarshal(plain, &c); err != nil {
-		return "", err
+		return "", "", err
 	}
-	return c.AccessToken, nil
+	return c.AccessToken, c.ProjectID, nil
 }
 
 type gwError string

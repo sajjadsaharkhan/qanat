@@ -11,7 +11,7 @@ import (
 // tokens on the CLI's usage endpoint (no model dependency), API keys on the
 // models list.
 func TestUpstreamProbeClaude(t *testing.T) {
-	req, err := upstreamProbe(t.Context(), "claude", "oauth", "sk-ant-oat01-x", "https://api.anthropic.com/")
+	req, err := upstreamProbe(t.Context(), "claude", "oauth", "sk-ant-oat01-x", "", "https://api.anthropic.com/")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +28,7 @@ func TestUpstreamProbeClaude(t *testing.T) {
 		t.Fatalf("oauth probe must not send x-api-key: %v", req.Header)
 	}
 
-	req, err = upstreamProbe(t.Context(), "claude", "api_key", "sk-ant-api01-y", "https://api.anthropic.com")
+	req, err = upstreamProbe(t.Context(), "claude", "api_key", "sk-ant-api01-y", "", "https://api.anthropic.com")
 	if err != nil {
 		t.Fatal(err)
 	}
