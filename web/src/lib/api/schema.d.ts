@@ -236,6 +236,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/network": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Live network analytics per provider, merged from every gateway's report (nothing stored; last 30 minutes) */
+        get: operations["adminNetwork"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/usage": {
         parameters: {
             query?: never;
@@ -1097,6 +1114,192 @@ export interface components {
         AccountProxy: string;
         /** @enum {string} */
         ProxyType: "http" | "https" | "socks5" | "socks5h";
+        NetworkOverview: {
+            /** Format: date-time */
+            generated_at: string;
+            /** @description Span of the summary statistics (5 minutes) */
+            window_seconds: number;
+            /** @description Report */
+            interval_seconds: number;
+            /** @description Gateways reporting now; empty means no data */
+            gateways: components["schemas"]["NetworkGateway"][];
+            /** @description Gateways' own link: TCP connect to public IP literals (worst gateway) */
+            internet: components["schemas"]["NetworkProbe"] | null;
+            internet_history: components["schemas"]["NetworkPoint"][];
+            providers: components["schemas"]["ProviderNetwork"][];
+        };
+        NetworkGateway: {
+            instance: string;
+            /** Format: date-time */
+            reported_at: string;
+            /** Format: date-time */
+            started_at: string;
+        };
+        NetworkPoint: {
+            /** Format: date-time */
+            t: string;
+            /**
+             * Format: int64
+             * @description Absent when unreachable
+             */
+            ms?: number;
+        };
+        /**
+         * @description Worst first. offline: the gateway's own network is down; unreachable: every route failed 2+ handshakes; unstable: real requests are failing upstream (3+ and half of attempts in 2 minutes); unavailable: no account can take traffic; degraded: slow or partly failing
+         * @enum {string}
+         */
+        NetworkState: "offline" | "unreachable" | "unstable" | "unavailable" | "degraded" | "checking" | "healthy" | "no_accounts";
+        NetworkStatus: {
+            state: components["schemas"]["NetworkState"];
+            /** @description unreachable: dns, tcp, proxy, proxy_auth, tls, timeout. unavailable: disconnected, cooling, no_route, disabled. degraded: probe_failed, slow_internet, slow_handshake, error_rate, rate_limited, accounts_out. checking: no_gateway */
+            reason?: string;
+            /** Format: date-time */
+            since: string;
+        };
+        /** @description One handshake (DNS, connect or proxy tunnel, TLS); no HTTP request is sent */
+        NetworkProbe: {
+            /** Format: date-time */
+            at: string;
+            /** @description Proxy ID or "direct" */
+            route: string;
+            origin: string;
+            ok: boolean;
+            /**
+             * Format: int64
+             * @description Absent when the proxy resolves the name
+             */
+            dns_ms?: number;
+            /** Format: int64 */
+            connect_ms?: number;
+            /** Format: int64 */
+            tls_ms?: number;
+            /** Format: int64 */
+            total_ms: number;
+            /** @enum {string} */
+            error?: "dns" | "tcp" | "proxy" | "proxy_auth" | "tls" | "timeout";
+            detail?: string;
+            /** @description Consecutive failures */
+            fails: number;
+            /**
+             * Format: int64
+             * @description Adaptive deadline: 3× the slowest recent good handshake, 3–10 s
+             */
+            timeout_ms: number;
+        };
+        RoutedProbe: components["schemas"]["NetworkProbe"] & {
+            route_label: string;
+        };
+        NetworkPercentiles: {
+            /** Format: int64 */
+            p50: number | null;
+            /** Format: int64 */
+            p95: number | null;
+        };
+        /** @description Over the window. Attempts count each upstream try, failovers included; rejected requests found no account */
+        NetworkStats: {
+            /** Format: int64 */
+            attempts: number;
+            /** Format: int64 */
+            ok: number;
+            /** Format: int64 */
+            errors: number;
+            /** Format: int64 */
+            rejected: number;
+            /**
+             * Format: int64
+             * @description The client went away
+             */
+            aborted: number;
+            error_rate: number;
+            per_minute: number;
+            reasons: {
+                [key: string]: number;
+            };
+            ttft_ms: components["schemas"]["NetworkPercentiles"];
+            latency_ms: components["schemas"]["NetworkPercentiles"];
+            overhead_ms: components["schemas"]["NetworkPercentiles"];
+            output_tps_p50?: number;
+            /** Format: date-time */
+            last_success_at?: string;
+            /** Format: date-time */
+            last_error_at?: string;
+            last_error?: string;
+        };
+        NetworkBucket: {
+            /** Format: date-time */
+            t: string;
+            /** Format: int64 */
+            requests: number;
+            /** Format: int64 */
+            errors: number;
+            /** Format: int64 */
+            rejected: number;
+            /** Format: int64 */
+            ttft_p50_ms?: number;
+            /** Format: int64 */
+            ttft_p95_ms?: number;
+            /** Format: int64 */
+            handshake_ms?: number;
+            active: number;
+        };
+        NetworkEvent: {
+            /** Format: date-time */
+            at: string;
+            account?: string;
+            account_label?: string;
+            model?: string;
+            status?: number;
+            /** @enum {string} */
+            outcome: "ok" | "error" | "rejected" | "aborted";
+            reason?: string;
+            /** Format: int64 */
+            ttft_ms?: number;
+            /** Format: int64 */
+            overhead_ms?: number;
+            /** Format: int64 */
+            duration_ms?: number;
+            output_tps?: number;
+        };
+        AccountNetwork: {
+            id: string;
+            label: string;
+            state: string;
+            disabled: boolean;
+            /** @description A gateway would route to it now */
+            usable: boolean;
+            active: number;
+            /** Format: date-time */
+            cooling_until: string | null;
+            /** Format: int64 */
+            attempts: number;
+            /** Format: int64 */
+            errors: number;
+            /** Format: int64 */
+            ttft_p50_ms: number | null;
+            /** Format: date-time */
+            last_success_at: string | null;
+        };
+        ProviderNetwork: {
+            id: string;
+            name: string;
+            prefix: string;
+            status: components["schemas"]["NetworkStatus"];
+            /** @description Responses streaming now */
+            active_connections: number;
+            stats: components["schemas"]["NetworkStats"];
+            accounts: components["schemas"]["AccountNetwork"][];
+            probes: components["schemas"]["RoutedProbe"][];
+            history: components["schemas"]["NetworkBucket"][];
+            /** @description Newest first */
+            recent: components["schemas"]["NetworkEvent"][];
+            /**
+             * Format: date-time
+             * @description Newest gateway report that included it
+             */
+            refreshed_at: string | null;
+            /** Format: date-time */
+            last_probe_at: string | null;
+        };
         Proxy: {
             id: string;
             label: string;
@@ -1649,6 +1852,26 @@ export interface operations {
             };
             400: components["responses"]["Error"];
             404: components["responses"]["Error"];
+        };
+    };
+    adminNetwork: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkOverview"];
+                };
+            };
         };
     };
     adminUsage: {

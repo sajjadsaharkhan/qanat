@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"qanat/internal/core/netstats"
 	"qanat/internal/core/oauth"
 	"qanat/internal/core/quota"
 	"qanat/internal/core/usage"
@@ -176,6 +177,7 @@ func (g *Gateway) forward(w http.ResponseWriter, r *http.Request, rt *route, o f
 			}
 			if err != nil {
 				upstreamErrors.WithLabelValues(m.Provider, a.ID, "connect").Inc()
+				g.net.record(m.Provider, netstats.Event{Account: a.ID, Model: m.Model, Outcome: netstats.Failed, Reason: "connect", DurMS: time.Since(attempt).Milliseconds()})
 				continue
 			}
 			if resp.StatusCode == http.StatusUnauthorized && a.AuthKind == "oauth" {
@@ -183,6 +185,8 @@ func (g *Gateway) forward(w http.ResponseWriter, r *http.Request, rt *route, o f
 				// so fail over and have the control plane refresh it.
 				g.requestRefresh(a)
 				upstreamErrors.WithLabelValues(m.Provider, a.ID, "unauthorized").Inc()
+				g.net.record(m.Provider, netstats.Event{Account: a.ID, Model: m.Model, Status: resp.StatusCode, Outcome: netstats.Failed, Reason: "unauthorized",
+					DurMS: time.Since(attempt).Milliseconds()})
 				io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
 				resp.Body.Close()
 				continue
@@ -194,6 +198,8 @@ func (g *Gateway) forward(w http.ResponseWriter, r *http.Request, rt *route, o f
 					reason = "rate_limited"
 				}
 				upstreamErrors.WithLabelValues(m.Provider, a.ID, reason).Inc()
+				g.net.record(m.Provider, netstats.Event{Account: a.ID, Model: m.Model, Status: resp.StatusCode, Outcome: netstats.Failed, Reason: reason,
+					DurMS: time.Since(attempt).Milliseconds()})
 				io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
 				resp.Body.Close()
 				continue
@@ -220,6 +226,15 @@ func (g *Gateway) forward(w http.ResponseWriter, r *http.Request, rt *route, o f
 		requestsTotal.WithLabelValues(endpoint, "529").Inc()
 	}
 	rejections.WithLabelValues("pool_exhausted").Inc()
+	if tried > 0 || len(unsupported) == 0 {
+		seen := map[string]bool{}
+		for _, m := range rt.members {
+			if _, ok := defaultBaseURL[m.Provider]; ok && !seen[m.Provider] {
+				seen[m.Provider] = true
+				g.net.record(m.Provider, netstats.Event{Model: m.Model, Status: 529, Outcome: netstats.Rejected, Reason: "pool_exhausted"})
+			}
+		}
+	}
 }
 
 func (g *Gateway) bindSticky(rt *route, provider, accountID string) {
@@ -300,6 +315,7 @@ func (g *Gateway) stream(w http.ResponseWriter, r *http.Request, rt *route, o fo
 	proxyStreams := proxyActiveStreams.WithLabelValues(proxyLabel(sp))
 	proxyStreams.Inc()
 	defer proxyStreams.Dec()
+	defer g.net.streamStart(m.Provider, a.ID)()
 
 	h := w.Header()
 	for k, v := range resp.Header {
@@ -382,11 +398,22 @@ func (g *Gateway) stream(w http.ResponseWriter, r *http.Request, rt *route, o fo
 			break
 		}
 	}
+	end := time.Now()
+	nev := netstats.Event{At: end, Account: a.ID, Model: m.Model, Status: resp.StatusCode, Outcome: netstats.OK, DurMS: end.Sub(attempt).Milliseconds()}
+	switch {
+	case errMsg == "upstream connection lost":
+		nev.Outcome, nev.Reason = netstats.Failed, "mid_stream"
+	case aborted:
+		nev.Outcome = netstats.Aborted
+	}
 	if !firstByte.IsZero() {
 		// Overhead = client TTFT − upstream TTFT (§15.1).
 		overhead.WithLabelValues(m.Provider).Observe((firstByte.Sub(o.start) - firstByte.Sub(attempt)).Seconds())
+		nev.TTFTMS = firstByte.Sub(attempt).Milliseconds()
+		nev.OverheadMS = attempt.Sub(o.start).Milliseconds()
 	}
 	if !o.usage {
+		g.net.record(m.Provider, nev)
 		return
 	}
 
@@ -394,6 +421,10 @@ func (g *Gateway) stream(w http.ResponseWriter, r *http.Request, rt *route, o fo
 	if !sse && charge {
 		u, _ = protocol.MessageUsage(body.Bytes())
 	}
+	if gen := end.Sub(firstByte).Seconds(); !firstByte.IsZero() && u.OutputTokens > 0 && gen > 0.05 {
+		nev.OutTPS = float64(u.OutputTokens) / gen
+	}
+	g.net.record(m.Provider, nev)
 	var total int64
 	if priced {
 		total = price.CostMicro(u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens)

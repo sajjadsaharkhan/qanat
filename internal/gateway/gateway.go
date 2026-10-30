@@ -46,6 +46,7 @@ type Gateway struct {
 	log      *slog.Logger
 	proxies  *proxy.Pool
 	health   *proxy.Health
+	net      *netTracker  // live analytics for the admin Network page
 	retained atomic.Int64 // snapshot generation proxies were last pruned at
 	testMode bool
 
@@ -60,7 +61,7 @@ type Gateway struct {
 func New(snap *Store, q *quota.Store, pub *Publisher, pg *pgxpool.Pool, log *slog.Logger, testMode bool) *Gateway {
 	return &Gateway{
 		snap: snap, quota: q, pub: pub, pg: pg, log: log, testMode: testMode,
-		proxies: proxy.NewPool(), health: proxy.NewHealth(),
+		proxies: proxy.NewPool(), health: proxy.NewHealth(), net: newNetTracker(),
 		cooldown: map[string]time.Time{}, sticky: map[string]string{},
 	}
 }

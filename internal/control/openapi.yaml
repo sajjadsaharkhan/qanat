@@ -141,6 +141,14 @@ paths:
           content: { application/json: { schema: { $ref: "#/components/schemas/UsageOverview" } } }
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /api/admin/network:
+    get:
+      operationId: adminNetwork
+      summary: Live network analytics per provider, merged from every gateway's report (nothing stored; last 30 minutes)
+      responses:
+        "200":
+          description: OK
+          content: { application/json: { schema: { $ref: "#/components/schemas/NetworkOverview" } } }
   /api/admin/usage:
     get:
       operationId: adminUsage
@@ -896,6 +904,151 @@ components:
       type: string
       description: '"inherit" (next level of PRD §8.2: provider, then global default, else direct), "direct", a proxy ID, or "group:" + a proxy group ID'
     ProxyType: { type: string, enum: [http, https, socks5, socks5h] }
+    NetworkOverview:
+      type: object
+      required: [generated_at, window_seconds, interval_seconds, gateways, internet, internet_history, providers]
+      properties:
+        generated_at: { type: string, format: date-time }
+        window_seconds: { type: integer, description: Span of the summary statistics (5 minutes) }
+        interval_seconds: { type: integer, description: Report, probe and history bucket cadence (10 seconds) }
+        gateways: { type: array, items: { $ref: "#/components/schemas/NetworkGateway" }, description: Gateways reporting now; empty means no data }
+        internet: { oneOf: [{ $ref: "#/components/schemas/NetworkProbe" }, { type: "null" }], description: "Gateways' own link: TCP connect to public IP literals (worst gateway)" }
+        internet_history: { type: array, items: { $ref: "#/components/schemas/NetworkPoint" } }
+        providers: { type: array, items: { $ref: "#/components/schemas/ProviderNetwork" } }
+    NetworkGateway:
+      type: object
+      required: [instance, reported_at, started_at]
+      properties:
+        instance: { type: string }
+        reported_at: { type: string, format: date-time }
+        started_at: { type: string, format: date-time }
+    NetworkPoint:
+      type: object
+      required: [t]
+      properties:
+        t: { type: string, format: date-time }
+        ms: { type: integer, format: int64, description: Absent when unreachable }
+    NetworkState:
+      type: string
+      enum: [offline, unreachable, unstable, unavailable, degraded, checking, healthy, no_accounts]
+      description: "Worst first. offline: the gateway's own network is down; unreachable: every route failed 2+ handshakes; unstable: real requests are failing upstream (3+ and half of attempts in 2 minutes); unavailable: no account can take traffic; degraded: slow or partly failing"
+    NetworkStatus:
+      type: object
+      required: [state, since]
+      properties:
+        state: { $ref: "#/components/schemas/NetworkState" }
+        reason:
+          type: string
+          description: "unreachable: dns, tcp, proxy, proxy_auth, tls, timeout. unavailable: disconnected, cooling, no_route, disabled. degraded: probe_failed, slow_internet, slow_handshake, error_rate, rate_limited, accounts_out. checking: no_gateway"
+        since: { type: string, format: date-time }
+    NetworkProbe:
+      type: object
+      required: [at, route, origin, ok, total_ms, fails, timeout_ms]
+      description: One handshake (DNS, connect or proxy tunnel, TLS); no HTTP request is sent
+      properties:
+        at: { type: string, format: date-time }
+        route: { type: string, description: Proxy ID or "direct" }
+        origin: { type: string }
+        ok: { type: boolean }
+        dns_ms: { type: integer, format: int64, description: Absent when the proxy resolves the name }
+        connect_ms: { type: integer, format: int64 }
+        tls_ms: { type: integer, format: int64 }
+        total_ms: { type: integer, format: int64 }
+        error: { type: string, enum: [dns, tcp, proxy, proxy_auth, tls, timeout] }
+        detail: { type: string }
+        fails: { type: integer, description: Consecutive failures, this one included }
+        timeout_ms: { type: integer, format: int64, description: "Adaptive deadline: 3× the slowest recent good handshake, 3–10 s" }
+    RoutedProbe:
+      allOf:
+        - { $ref: "#/components/schemas/NetworkProbe" }
+        - type: object
+          required: [route_label]
+          properties:
+            route_label: { type: string }
+    NetworkPercentiles:
+      type: object
+      required: [p50, p95]
+      properties:
+        p50: { type: [integer, "null"], format: int64 }
+        p95: { type: [integer, "null"], format: int64 }
+    NetworkStats:
+      type: object
+      required: [attempts, ok, errors, rejected, aborted, error_rate, per_minute, reasons, ttft_ms, latency_ms, overhead_ms]
+      description: Over the window. Attempts count each upstream try, failovers included; rejected requests found no account
+      properties:
+        attempts: { type: integer, format: int64 }
+        ok: { type: integer, format: int64 }
+        errors: { type: integer, format: int64 }
+        rejected: { type: integer, format: int64 }
+        aborted: { type: integer, format: int64, description: The client went away }
+        error_rate: { type: number }
+        per_minute: { type: number }
+        reasons: { type: object, additionalProperties: { type: integer, format: int64 } }
+        ttft_ms: { $ref: "#/components/schemas/NetworkPercentiles" }
+        latency_ms: { $ref: "#/components/schemas/NetworkPercentiles" }
+        overhead_ms: { $ref: "#/components/schemas/NetworkPercentiles" }
+        output_tps_p50: { type: number }
+        last_success_at: { type: string, format: date-time }
+        last_error_at: { type: string, format: date-time }
+        last_error: { type: string }
+    NetworkBucket:
+      type: object
+      required: [t, requests, errors, rejected, active]
+      properties:
+        t: { type: string, format: date-time }
+        requests: { type: integer, format: int64 }
+        errors: { type: integer, format: int64 }
+        rejected: { type: integer, format: int64 }
+        ttft_p50_ms: { type: integer, format: int64 }
+        ttft_p95_ms: { type: integer, format: int64 }
+        handshake_ms: { type: integer, format: int64 }
+        active: { type: integer }
+    NetworkEvent:
+      type: object
+      required: [at, outcome]
+      properties:
+        at: { type: string, format: date-time }
+        account: { type: string }
+        account_label: { type: string }
+        model: { type: string }
+        status: { type: integer }
+        outcome: { type: string, enum: [ok, error, rejected, aborted] }
+        reason: { type: string }
+        ttft_ms: { type: integer, format: int64 }
+        overhead_ms: { type: integer, format: int64 }
+        duration_ms: { type: integer, format: int64 }
+        output_tps: { type: number }
+    AccountNetwork:
+      type: object
+      required: [id, label, state, disabled, usable, active, cooling_until, attempts, errors, ttft_p50_ms, last_success_at]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        state: { type: string }
+        disabled: { type: boolean }
+        usable: { type: boolean, description: A gateway would route to it now }
+        active: { type: integer }
+        cooling_until: { type: [string, "null"], format: date-time }
+        attempts: { type: integer, format: int64 }
+        errors: { type: integer, format: int64 }
+        ttft_p50_ms: { type: [integer, "null"], format: int64 }
+        last_success_at: { type: [string, "null"], format: date-time }
+    ProviderNetwork:
+      type: object
+      required: [id, name, prefix, status, active_connections, stats, accounts, probes, history, recent, refreshed_at, last_probe_at]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        prefix: { type: string }
+        status: { $ref: "#/components/schemas/NetworkStatus" }
+        active_connections: { type: integer, description: Responses streaming now }
+        stats: { $ref: "#/components/schemas/NetworkStats" }
+        accounts: { type: array, items: { $ref: "#/components/schemas/AccountNetwork" } }
+        probes: { type: array, items: { $ref: "#/components/schemas/RoutedProbe" } }
+        history: { type: array, items: { $ref: "#/components/schemas/NetworkBucket" } }
+        recent: { type: array, items: { $ref: "#/components/schemas/NetworkEvent" }, description: Newest first }
+        refreshed_at: { type: [string, "null"], format: date-time, description: Newest gateway report that included it }
+        last_probe_at: { type: [string, "null"], format: date-time }
     Proxy:
       type: object
       required: [id, label, type, host, port, username, has_password, enabled, is_default, account_count, created_at, health]

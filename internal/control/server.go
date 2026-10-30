@@ -170,6 +170,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.Handle("GET /api/me/usage", user(s.myUsage))
 	mux.Handle("GET /api/me/usage/overview", user(s.myUsageOverview))
 	mux.Handle("GET /api/admin/usage/overview", admin(s.adminUsageOverview))
+	mux.Handle("GET /api/admin/network", admin(s.adminNetwork))
 	mux.Handle("GET /api/admin/usage", admin(s.adminUsage))
 	mux.Handle("GET /api/admin/usage/{id}", admin(s.adminUserUsage))
 

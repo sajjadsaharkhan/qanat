@@ -160,6 +160,11 @@ Done right means you can tell states apart **without color**, by symbol shape an
 | Account `disconnected` | `destructive` | `unplug` | one pulse on arrival, then sober | Needs you rank 1 |
 | Proxy unhealthy | `warning` (failover available) / `destructive` (no healthy member) | `shield-alert` | none | proxies list, Needs you |
 | Pool headroom low | `warning` | `gauge` | none | admin overview, Needs you |
+| Provider network `healthy` | — | `circle-check` (muted) | none | Network page |
+| Provider network `degraded` | `warning` | `triangle-alert` | none | Network page |
+| Provider network `unstable` / `unreachable` / `offline` | `destructive` | `octagon-x` | none | Network page |
+| Provider network `unavailable` (no account can serve) | `destructive` | `unplug` | none | Network page |
+| Provider network `checking` / not connected | `muted-foreground` | `circle-dashed` | none | Network page |
 | Request ok | — | none | none | recent requests |
 | Request `aborted` | `muted-foreground` | `circle-slash` | none | recent requests |
 | Request error | `destructive-text` | `circle-x` | none | recent requests |

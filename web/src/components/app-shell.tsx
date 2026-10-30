@@ -9,6 +9,7 @@ import {
   LayoutGrid,
   LogOut,
   Network,
+  Radar,
   ScrollText,
   Server,
   Shapes,
@@ -65,6 +66,7 @@ const adminNav: NavItem[] = [
   { href: "/admin/plans", label: "Plans", icon: Wallet },
   { href: "/admin/accounts", label: "Accounts", icon: Server },
   { href: "/admin/proxies", label: "Proxies", icon: Network },
+  { href: "/admin/network", label: "Network", icon: Radar },
   { href: "/admin/models", label: "Models", icon: Shapes },
   { href: "/admin/audit", label: "Audit log", icon: ScrollText },
 ];

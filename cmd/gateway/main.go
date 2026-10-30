@@ -55,6 +55,7 @@ func main() {
 	gw := gateway.New(snap, quota.NewStore(rdb), pub, pg, log, cfg.TestMode)
 
 	go gw.RunProxyHealth(watchCtx, rdb)
+	go gw.RunNetStats(watchCtx, rdb)
 
 	mux := http.NewServeMux()
 	gw.Register(mux)
