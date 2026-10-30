@@ -106,6 +106,27 @@ func TestModelNames_Prefixed(t *testing.T) {
 	}
 }
 
+// A provider whose every account is disabled or disconnected takes no
+// traffic, so its prefixed names stop being advertised.
+func TestModelNames_UsableAccountsOnly(t *testing.T) {
+	s := testSnapshot()
+	s.accounts = map[string][]*Account{
+		"claude":      {{ID: "a", Disabled: true}},
+		"codex":       {{ID: "b", State: "disconnected"}},
+		"antigravity": {{ID: "c", Disabled: true}, {ID: "d", State: "healthy"}},
+	}
+	s.prices["gpt-5.5"] = Price{}
+	got := s.ModelNames(&Plan{}, &Key{})
+	for _, not := range []string{"cc/claude-sonnet-4-6", "cc/claude-opus-4-7", "cx/gpt-5.5"} {
+		if slices.Contains(got, not) {
+			t.Errorf("disabled/disconnected provider advertised %s", not)
+		}
+	}
+	if !slices.Contains(got, "ag/claude-sonnet-4-6") {
+		t.Errorf("antigravity has a healthy account; want ag/ names in %v", got)
+	}
+}
+
 // §10.2: per-model windows bind only that model; grants raise every limit.
 func TestWindows(t *testing.T) {
 	p := &Plan{Quotas: []quota.Window{
