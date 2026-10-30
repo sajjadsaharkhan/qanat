@@ -48,6 +48,11 @@
   --destructive-text: #b8282d;
   --success: #4b7a3f;
 
+  /* Switch (design.md §3.2): track on/off and thumb, each ≥ 3:1. */
+  --switch-on: #4b7a3f;
+  --switch-off: #7d7a6f;
+  --switch-thumb: #ffffff;
+
   --model-fable: #c9a227;
   --model-opus: #b0343c;
   --model-sonnet: #3b6fb5;
@@ -115,6 +120,10 @@
   --destructive-text: #ff8f92;
   --success: #6f9a5e;
 
+  --switch-on: #6f9a5e;
+  --switch-off: #6e6a5f;
+  --switch-thumb: #0c0a08;
+
   --chart-1: rgb(185 187 168 / 1);
   --chart-2: rgb(185 187 168 / 0.72);
   --chart-3: rgb(185 187 168 / 0.52);
@@ -176,6 +185,9 @@
   --color-destructive: var(--destructive);
   --color-destructive-text: var(--destructive-text);
   --color-success: var(--success);
+  --color-switch-on: var(--switch-on);
+  --color-switch-off: var(--switch-off);
+  --color-switch-thumb: var(--switch-thumb);
   --color-brand-soft: var(--brand-soft);
   --color-brand-text: var(--brand-text);
   --color-brand-deep: var(--brand-deep);

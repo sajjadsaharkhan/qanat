@@ -88,6 +88,14 @@ Signal colors have separate **fill** and **text** tokens, because the fill hues 
 - Amber and red appear **only** for the states in §5. Nothing else is tinted: info banners, tips, tags and charts below a warning line stay neutral.
 - Green appears **only** on switches that are on. A healthy account is not green, it is quiet.
 
+**Switch.** The switch has its own tokens so both states read at a glance in both themes. Every pair holds 3:1 (WCAG 1.4.11): the thumb against each track, and each track against `background`, `card`, `muted` and `sidebar`. The thumb is light on the light theme and dark on the dark theme, because a light thumb can't reach 3:1 on a green that is also bright enough to stand off a near-black page. On and off differ by thumb position too, never by color alone.
+
+| Part | Token | Light | Dark |
+|---|---|---|---|
+| Track, on | `--switch-on` | `#4B7A3F` (= `--success`) | `#6F9A5E` (= `--success`) |
+| Track, off | `--switch-off` | `#7D7A6F` | `#6E6A5F` |
+| Thumb | `--switch-thumb` | `#FFFFFF` | `#0C0A08` |
+
 ### 3.3 Model tier accents
 
 Carried over from Tower, with one change for accessibility. In Tower the accent colors the tier's text label. Here, every accent fails 4.5:1 as text in one theme or the other (e.g. Fable gold is 2.4:1 on white), so the accent appears **only** as a 6 px dot before the tier label, which stays `muted-foreground`. It is also the series color when a chart is broken down by model. It never colors text, a mark, a row background or a badge fill.

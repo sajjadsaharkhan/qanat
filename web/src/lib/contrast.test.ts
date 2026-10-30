@@ -48,6 +48,8 @@ function contrast(a: string, b: string): number {
 const surfaces = ["background", "card", "muted", "accent", "sidebar", "brand-soft", "sand-soft"];
 const texts = ["foreground", "muted-foreground", "warning-text", "destructive-text", "brand-text", "sand-text"];
 const fills = ["warning", "destructive", "primary"];
+// Switches sit on any surface; the thumb must read on both track states.
+const switchSurfaces = ["background", "card", "muted", "sidebar"];
 
 for (const [theme, t] of [
   ["light", light],
@@ -82,5 +84,15 @@ for (const [theme, t] of [
         it(`${fill} fill vs ${against} ≥ 3:1`, () => {
           expect(contrast(token(t, fill), token(t, against))).toBeGreaterThanOrEqual(3);
         });
+
+    for (const track of ["switch-on", "switch-off"]) {
+      it(`switch thumb on ${track} ≥ 3:1`, () => {
+        expect(contrast(token(t, "switch-thumb"), token(t, track))).toBeGreaterThanOrEqual(3);
+      });
+      for (const surface of switchSurfaces)
+        it(`${track} track vs ${surface} ≥ 3:1`, () => {
+          expect(contrast(token(t, track), token(t, surface))).toBeGreaterThanOrEqual(3);
+        });
+    }
   });
 }
