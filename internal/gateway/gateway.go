@@ -14,20 +14,22 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"qanat/internal/core/apikey"
+	"qanat/internal/core/provider"
 	"qanat/internal/core/quota"
 	"qanat/internal/protocol"
+	"qanat/internal/proxy"
 	"qanat/internal/store/db"
 )
 
@@ -41,7 +43,9 @@ type Gateway struct {
 	pub      *Publisher
 	pg       *pgxpool.Pool
 	log      *slog.Logger
-	client   *http.Client
+	proxies  *proxy.Pool
+	health   *proxy.Health
+	retained atomic.Int64 // snapshot generation proxies were last pruned at
 	testMode bool
 
 	// cooldown and sticky overlay the snapshot with what this replica learned
@@ -55,24 +59,8 @@ type Gateway struct {
 func New(snap *Store, q *quota.Store, pub *Publisher, pg *pgxpool.Pool, log *slog.Logger, testMode bool) *Gateway {
 	return &Gateway{
 		snap: snap, quota: q, pub: pub, pg: pg, log: log, testMode: testMode,
-		client:   &http.Client{Transport: newTransport()},
+		proxies: proxy.NewPool(), health: proxy.NewHealth(),
 		cooldown: map[string]time.Time{}, sticky: map[string]string{},
-	}
-}
-
-// newTransport is the warm upstream pool (§9: HTTP/2, keep-alive, TLS
-// resumption). Compression is off: SSE must arrive as written.
-func newTransport() *http.Transport {
-	return &http.Transport{
-		Proxy:                 nil, // per-provider proxies arrive in P1 (§8)
-		DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
-		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          256,
-		MaxIdleConnsPerHost:   64,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ResponseHeaderTimeout: 10 * time.Minute, // long thinking can delay headers
-		DisableCompression:    true,
 	}
 }
 
@@ -209,10 +197,12 @@ func (g *Gateway) resolve(w http.ResponseWriter, r *http.Request, c *caller, end
 }
 
 // windows returns the Plan's windows that apply to name, with top-ups added.
+// A per-model window binds the prefixed name too ("cc/opus" counts as "opus").
 func windows(p *Plan, grantMicro int64, name string) []quota.Window {
+	bare := provider.Bare(name)
 	var ws []quota.Window
 	for _, w := range p.Quotas {
-		if w.Scope == "" || w.Scope == name {
+		if w.Scope == "" || w.Scope == name || w.Scope == bare {
 			w.LimitMicro += grantMicro
 			ws = append(ws, w)
 		}

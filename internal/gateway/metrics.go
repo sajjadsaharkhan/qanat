@@ -54,6 +54,30 @@ var (
 		Name: "qanat_account_healthy", Help: "1 if the upstream account is healthy.",
 	}, []string{"provider", "account"})
 
+	// Per-proxy metrics (REQ-PROXY-06). The proxy label is the proxy ID, or
+	// "direct".
+	proxyHealthy = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "qanat_proxy_healthy", Help: "1 if the last health checks reached the upstream origin through the proxy.",
+	}, []string{"proxy", "origin"})
+
+	proxyCheckLatency = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "qanat_proxy_check_latency_seconds", Help: "Connect + TLS latency of the last health check, by proxy and upstream origin.",
+	}, []string{"proxy", "origin"})
+
+	proxyConnect = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "qanat_proxy_connect_seconds",
+		Help:    "Time to open a new upstream connection (dial, proxy handshake, TLS); reused connections are not observed.",
+		Buckets: prometheus.ExponentialBuckets(.005, 2, 11),
+	}, []string{"proxy"})
+
+	proxyErrors = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "qanat_proxy_errors_total", Help: "Upstream failures through a proxy, by kind (connect, mid_stream).",
+	}, []string{"proxy", "kind"})
+
+	proxyActiveStreams = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "qanat_proxy_active_streams", Help: "Responses currently streaming through each proxy.",
+	}, []string{"proxy"})
+
 	snapshotGeneration = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "qanat_config_generation", Help: "Config generation of the gateway's snapshot.",
 	})

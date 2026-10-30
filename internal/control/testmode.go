@@ -34,7 +34,7 @@ func (s *Server) registerTestMode(mux *http.ServeMux) {
 // resetTables is every table holding state; schema_migrations and
 // config_generation (monotonic on purpose) are kept.
 var resetTables = []string{
-	"audit_log", "usage_5m", "usage_hourly", "usage_daily", "sticky_bindings", "provider_accounts",
+	"audit_log", "usage_5m", "usage_hourly", "usage_daily", "sticky_bindings", "provider_accounts", "proxies",
 	"model_prices", "model_mappings", "combo_members", "combos", "quota_grants", "api_keys",
 	"users", "plan_models", "plan_limits", "plan_quotas", "plans",
 }
