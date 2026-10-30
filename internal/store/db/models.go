@@ -109,15 +109,57 @@ type PlanQuota struct {
 }
 
 type ProviderAccount struct {
-	ID            string
-	Provider      string
-	Label         string
-	BaseUrl       *string
-	Credentials   []byte
-	State         string
-	CooldownUntil *time.Time
-	Position      pgtype.Int8
-	CreatedAt     time.Time
+	ID             string
+	Provider       string
+	Label          string
+	BaseUrl        *string
+	Credentials    []byte
+	State          string
+	CooldownUntil  *time.Time
+	Position       pgtype.Int8
+	CreatedAt      time.Time
+	ProxyID        *string
+	ProxyDirect    bool
+	ProxyGroupID   *string
+	AuthKind       string
+	ExpiresAt      *time.Time
+	DisabledAt     *time.Time
+	LastCheckAt    *time.Time
+	LastCheckOk    pgtype.Bool
+	LastCheckError *string
+}
+
+type ProviderProxy struct {
+	Provider     string
+	ProxyID      *string
+	ProxyGroupID *string
+	ProxyDirect  bool
+}
+
+type Proxy struct {
+	ID        string
+	Label     string
+	Type      string
+	Host      string
+	Port      int32
+	Username  *string
+	Password  []byte
+	Enabled   bool
+	IsDefault bool
+	CreatedAt time.Time
+}
+
+type ProxyGroup struct {
+	ID        string
+	Label     string
+	Policy    string
+	CreatedAt time.Time
+}
+
+type ProxyGroupMember struct {
+	GroupID  string
+	ProxyID  string
+	Priority int32
 }
 
 type QuotaGrant struct {
@@ -150,6 +192,7 @@ type Usage5m struct {
 	CacheWriteTokens int64
 	CostUsd          float64
 	RequestCount     int64
+	AccountID        string
 }
 
 type UsageDaily struct {
@@ -166,6 +209,7 @@ type UsageDaily struct {
 	CacheWriteTokens int64
 	CostUsd          float64
 	RequestCount     int64
+	AccountID        string
 }
 
 type UsageHourly struct {
@@ -182,6 +226,7 @@ type UsageHourly struct {
 	CacheWriteTokens int64
 	CostUsd          float64
 	RequestCount     int64
+	AccountID        string
 }
 
 type User struct {

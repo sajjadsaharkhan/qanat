@@ -9,18 +9,55 @@ import (
 	"context"
 	"net/netip"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const accountPositions = `-- name: AccountPositions :many
+SELECT id, position FROM provider_accounts WHERE provider = $1 ORDER BY position
+`
+
+type AccountPositionsRow struct {
+	ID       string
+	Position pgtype.Int8
+}
+
+func (q *Queries) AccountPositions(ctx context.Context, provider string) ([]AccountPositionsRow, error) {
+	rows, err := q.db.Query(ctx, accountPositions, provider)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AccountPositionsRow{}
+	for rows.Next() {
+		var i AccountPositionsRow
+		if err := rows.Scan(&i.ID, &i.Position); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const createAccount = `-- name: CreateAccount :exec
-INSERT INTO provider_accounts (id, provider, label, base_url, credentials) VALUES ($1, $2, $3, $4, $5)
+INSERT INTO provider_accounts (id, provider, label, base_url, credentials, auth_kind, expires_at, position, proxy_id, proxy_group_id, proxy_direct)
+VALUES ($1, $2, $3, $4, $5, $6, $7, (SELECT coalesce(max(position), 0) + 1 FROM provider_accounts), $8, $9, $10)
 `
 
 type CreateAccountParams struct {
-	ID          string
-	Provider    string
-	Label       string
-	BaseUrl     *string
-	Credentials []byte
+	ID           string
+	Provider     string
+	Label        string
+	BaseUrl      *string
+	Credentials  []byte
+	AuthKind     string
+	ExpiresAt    *time.Time
+	ProxyID      *string
+	ProxyGroupID *string
+	ProxyDirect  bool
 }
 
 func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) error {
@@ -30,6 +67,11 @@ func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) er
 		arg.Label,
 		arg.BaseUrl,
 		arg.Credentials,
+		arg.AuthKind,
+		arg.ExpiresAt,
+		arg.ProxyID,
+		arg.ProxyGroupID,
+		arg.ProxyDirect,
 	)
 	return err
 }
@@ -65,6 +107,50 @@ func (q *Queries) DeleteOldUsage5m(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const getAccountAdmin = `-- name: GetAccountAdmin :one
+SELECT id, provider, label, base_url, credentials, state, cooldown_until,
+       auth_kind, expires_at, disabled_at, proxy_id, proxy_group_id, proxy_direct
+FROM provider_accounts
+WHERE id = $1
+`
+
+type GetAccountAdminRow struct {
+	ID            string
+	Provider      string
+	Label         string
+	BaseUrl       *string
+	Credentials   []byte
+	State         string
+	CooldownUntil *time.Time
+	AuthKind      string
+	ExpiresAt     *time.Time
+	DisabledAt    *time.Time
+	ProxyID       *string
+	ProxyGroupID  *string
+	ProxyDirect   bool
+}
+
+func (q *Queries) GetAccountAdmin(ctx context.Context, id string) (GetAccountAdminRow, error) {
+	row := q.db.QueryRow(ctx, getAccountAdmin, id)
+	var i GetAccountAdminRow
+	err := row.Scan(
+		&i.ID,
+		&i.Provider,
+		&i.Label,
+		&i.BaseUrl,
+		&i.Credentials,
+		&i.State,
+		&i.CooldownUntil,
+		&i.AuthKind,
+		&i.ExpiresAt,
+		&i.DisabledAt,
+		&i.ProxyID,
+		&i.ProxyGroupID,
+		&i.ProxyDirect,
+	)
+	return i, err
 }
 
 const insertConfirmedPrice = `-- name: InsertConfirmedPrice :one
@@ -122,7 +208,9 @@ func (q *Queries) InsertMapping(ctx context.Context, arg InsertMappingParams) er
 
 const listAccounts = `-- name: ListAccounts :many
 
-SELECT id, provider, label, base_url, (credentials IS NOT NULL)::boolean AS has_credentials, state, cooldown_until, created_at
+SELECT id, provider, label, base_url, (credentials IS NOT NULL)::boolean AS has_credentials, state, cooldown_until, created_at,
+       auth_kind, expires_at, disabled_at, last_check_at, last_check_ok, last_check_error, position,
+       proxy_id, proxy_group_id, proxy_direct
 FROM provider_accounts
 ORDER BY position
 `
@@ -136,6 +224,16 @@ type ListAccountsRow struct {
 	State          string
 	CooldownUntil  *time.Time
 	CreatedAt      time.Time
+	AuthKind       string
+	ExpiresAt      *time.Time
+	DisabledAt     *time.Time
+	LastCheckAt    *time.Time
+	LastCheckOk    pgtype.Bool
+	LastCheckError *string
+	Position       pgtype.Int8
+	ProxyID        *string
+	ProxyGroupID   *string
+	ProxyDirect    bool
 }
 
 // Admin API: provider accounts, model mapping, prices (PRD §6, §10.1).
@@ -157,6 +255,16 @@ func (q *Queries) ListAccounts(ctx context.Context) ([]ListAccountsRow, error) {
 			&i.State,
 			&i.CooldownUntil,
 			&i.CreatedAt,
+			&i.AuthKind,
+			&i.ExpiresAt,
+			&i.DisabledAt,
+			&i.LastCheckAt,
+			&i.LastCheckOk,
+			&i.LastCheckError,
+			&i.Position,
+			&i.ProxyID,
+			&i.ProxyGroupID,
+			&i.ProxyDirect,
 		); err != nil {
 			return nil, err
 		}
@@ -258,6 +366,68 @@ func (q *Queries) ListPrices(ctx context.Context) ([]ListPricesRow, error) {
 	return items, nil
 }
 
+const setAccountCheckResult = `-- name: SetAccountCheckResult :exec
+UPDATE provider_accounts SET last_check_at = $2, last_check_ok = $3, last_check_error = $4 WHERE id = $1
+`
+
+type SetAccountCheckResultParams struct {
+	ID             string
+	LastCheckAt    *time.Time
+	LastCheckOk    pgtype.Bool
+	LastCheckError *string
+}
+
+func (q *Queries) SetAccountCheckResult(ctx context.Context, arg SetAccountCheckResultParams) error {
+	_, err := q.db.Exec(ctx, setAccountCheckResult,
+		arg.ID,
+		arg.LastCheckAt,
+		arg.LastCheckOk,
+		arg.LastCheckError,
+	)
+	return err
+}
+
+const setAccountPosition = `-- name: SetAccountPosition :execrows
+UPDATE provider_accounts SET position = $2 WHERE id = $1
+`
+
+type SetAccountPositionParams struct {
+	ID       string
+	Position pgtype.Int8
+}
+
+func (q *Queries) SetAccountPosition(ctx context.Context, arg SetAccountPositionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setAccountPosition, arg.ID, arg.Position)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setAccountProxy = `-- name: SetAccountProxy :execrows
+UPDATE provider_accounts SET proxy_id = $2, proxy_group_id = $3, proxy_direct = $4 WHERE id = $1
+`
+
+type SetAccountProxyParams struct {
+	ID           string
+	ProxyID      *string
+	ProxyGroupID *string
+	ProxyDirect  bool
+}
+
+func (q *Queries) SetAccountProxy(ctx context.Context, arg SetAccountProxyParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setAccountProxy,
+		arg.ID,
+		arg.ProxyID,
+		arg.ProxyGroupID,
+		arg.ProxyDirect,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const touchKey = `-- name: TouchKey :exec
 UPDATE api_keys SET last_used_at = $2, last_ip = $3
 WHERE id = $1 AND (last_used_at IS NULL OR last_used_at < $2)
@@ -274,11 +444,43 @@ func (q *Queries) TouchKey(ctx context.Context, arg TouchKeyParams) error {
 	return err
 }
 
+const updateAccountCore = `-- name: UpdateAccountCore :execrows
+UPDATE provider_accounts
+SET label = $2, base_url = $3, auth_kind = $4, expires_at = $5, credentials = $6, disabled_at = $7
+WHERE id = $1
+`
+
+type UpdateAccountCoreParams struct {
+	ID          string
+	Label       string
+	BaseUrl     *string
+	AuthKind    string
+	ExpiresAt   *time.Time
+	Credentials []byte
+	DisabledAt  *time.Time
+}
+
+func (q *Queries) UpdateAccountCore(ctx context.Context, arg UpdateAccountCoreParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateAccountCore,
+		arg.ID,
+		arg.Label,
+		arg.BaseUrl,
+		arg.AuthKind,
+		arg.ExpiresAt,
+		arg.Credentials,
+		arg.DisabledAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const upsertUsage5m = `-- name: UpsertUsage5m :exec
-INSERT INTO usage_5m (bucket_start, user_id, key_id, provider, upstream_model, aborted, price_version,
+INSERT INTO usage_5m (bucket_start, user_id, key_id, provider, upstream_model, account_id, aborted, price_version,
                       input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, request_count)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1)
-ON CONFLICT (bucket_start, user_id, key_id, provider, upstream_model, aborted, price_version) DO UPDATE SET
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 1)
+ON CONFLICT (bucket_start, user_id, key_id, provider, upstream_model, account_id, aborted, price_version) DO UPDATE SET
     input_tokens = usage_5m.input_tokens + EXCLUDED.input_tokens,
     output_tokens = usage_5m.output_tokens + EXCLUDED.output_tokens,
     cache_read_tokens = usage_5m.cache_read_tokens + EXCLUDED.cache_read_tokens,
@@ -293,6 +495,7 @@ type UpsertUsage5mParams struct {
 	KeyID            string
 	Provider         string
 	UpstreamModel    string
+	AccountID        string
 	Aborted          bool
 	PriceVersion     int64
 	InputTokens      int64
@@ -310,6 +513,7 @@ func (q *Queries) UpsertUsage5m(ctx context.Context, arg UpsertUsage5mParams) er
 		arg.KeyID,
 		arg.Provider,
 		arg.UpstreamModel,
+		arg.AccountID,
 		arg.Aborted,
 		arg.PriceVersion,
 		arg.InputTokens,
@@ -322,10 +526,10 @@ func (q *Queries) UpsertUsage5m(ctx context.Context, arg UpsertUsage5mParams) er
 }
 
 const upsertUsageDaily = `-- name: UpsertUsageDaily :exec
-INSERT INTO usage_daily (bucket_start, user_id, key_id, provider, upstream_model, aborted, price_version,
+INSERT INTO usage_daily (bucket_start, user_id, key_id, provider, upstream_model, account_id, aborted, price_version,
                          input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, request_count)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1)
-ON CONFLICT (bucket_start, user_id, key_id, provider, upstream_model, aborted, price_version) DO UPDATE SET
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 1)
+ON CONFLICT (bucket_start, user_id, key_id, provider, upstream_model, account_id, aborted, price_version) DO UPDATE SET
     input_tokens = usage_daily.input_tokens + EXCLUDED.input_tokens,
     output_tokens = usage_daily.output_tokens + EXCLUDED.output_tokens,
     cache_read_tokens = usage_daily.cache_read_tokens + EXCLUDED.cache_read_tokens,
@@ -340,6 +544,7 @@ type UpsertUsageDailyParams struct {
 	KeyID            string
 	Provider         string
 	UpstreamModel    string
+	AccountID        string
 	Aborted          bool
 	PriceVersion     int64
 	InputTokens      int64
@@ -356,6 +561,7 @@ func (q *Queries) UpsertUsageDaily(ctx context.Context, arg UpsertUsageDailyPara
 		arg.KeyID,
 		arg.Provider,
 		arg.UpstreamModel,
+		arg.AccountID,
 		arg.Aborted,
 		arg.PriceVersion,
 		arg.InputTokens,
@@ -368,10 +574,10 @@ func (q *Queries) UpsertUsageDaily(ctx context.Context, arg UpsertUsageDailyPara
 }
 
 const upsertUsageHourly = `-- name: UpsertUsageHourly :exec
-INSERT INTO usage_hourly (bucket_start, user_id, key_id, provider, upstream_model, aborted, price_version,
+INSERT INTO usage_hourly (bucket_start, user_id, key_id, provider, upstream_model, account_id, aborted, price_version,
                           input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, request_count)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1)
-ON CONFLICT (bucket_start, user_id, key_id, provider, upstream_model, aborted, price_version) DO UPDATE SET
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 1)
+ON CONFLICT (bucket_start, user_id, key_id, provider, upstream_model, account_id, aborted, price_version) DO UPDATE SET
     input_tokens = usage_hourly.input_tokens + EXCLUDED.input_tokens,
     output_tokens = usage_hourly.output_tokens + EXCLUDED.output_tokens,
     cache_read_tokens = usage_hourly.cache_read_tokens + EXCLUDED.cache_read_tokens,
@@ -386,6 +592,7 @@ type UpsertUsageHourlyParams struct {
 	KeyID            string
 	Provider         string
 	UpstreamModel    string
+	AccountID        string
 	Aborted          bool
 	PriceVersion     int64
 	InputTokens      int64
@@ -402,6 +609,7 @@ func (q *Queries) UpsertUsageHourly(ctx context.Context, arg UpsertUsageHourlyPa
 		arg.KeyID,
 		arg.Provider,
 		arg.UpstreamModel,
+		arg.AccountID,
 		arg.Aborted,
 		arg.PriceVersion,
 		arg.InputTokens,

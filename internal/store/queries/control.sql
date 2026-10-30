@@ -6,6 +6,31 @@ SELECT 'root@qanat.local', 'Root admin', 'root', 'admin', id FROM plans WHERE is
 ON CONFLICT (username) DO UPDATE SET role = 'admin', disabled_at = NULL
 RETURNING id;
 
+-- name: GetUserByOIDCSubject :one
+SELECT u.id, u.email, u.name, u.role, u.plan_id, p.name AS plan_name, u.created_at, u.disabled_at
+FROM users u
+JOIN plans p ON p.id = u.plan_id
+WHERE u.oidc_subject = $1;
+
+-- name: GetUserByEmail :one
+SELECT u.id, u.email, u.name, u.role, u.plan_id, p.name AS plan_name, u.created_at, u.disabled_at
+FROM users u
+JOIN plans p ON p.id = u.plan_id
+WHERE lower(u.email) = lower($1);
+
+-- name: CreateOIDCUser :one
+INSERT INTO users (email, name, oidc_subject, role, plan_id)
+SELECT $1, $2, $3, $4, id FROM plans WHERE is_default
+RETURNING id, role;
+
+-- name: UpdateOIDCUser :exec
+UPDATE users
+SET email = sqlc.arg(email),
+    name = CASE WHEN sqlc.arg(name)::text <> '' THEN sqlc.arg(name)::text ELSE users.name END,
+    oidc_subject = COALESCE(oidc_subject, sqlc.narg(oidc_subject)),
+    disabled_at = NULL
+WHERE id = sqlc.arg(id);
+
 -- name: GetUser :one
 SELECT u.id, u.email, u.name, u.username, u.role, u.plan_id, p.name AS plan_name, u.created_at, u.disabled_at
 FROM users u

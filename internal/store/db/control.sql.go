@@ -60,6 +60,36 @@ func (q *Queries) CreateKey(ctx context.Context, arg CreateKeyParams) (CreateKey
 	return i, err
 }
 
+const createOIDCUser = `-- name: CreateOIDCUser :one
+INSERT INTO users (email, name, oidc_subject, role, plan_id)
+SELECT $1, $2, $3, $4, id FROM plans WHERE is_default
+RETURNING id, role
+`
+
+type CreateOIDCUserParams struct {
+	Email       string
+	Name        string
+	OidcSubject *string
+	Role        string
+}
+
+type CreateOIDCUserRow struct {
+	ID   string
+	Role string
+}
+
+func (q *Queries) CreateOIDCUser(ctx context.Context, arg CreateOIDCUserParams) (CreateOIDCUserRow, error) {
+	row := q.db.QueryRow(ctx, createOIDCUser,
+		arg.Email,
+		arg.Name,
+		arg.OidcSubject,
+		arg.Role,
+	)
+	var i CreateOIDCUserRow
+	err := row.Scan(&i.ID, &i.Role)
+	return i, err
+}
+
 const createPlan = `-- name: CreatePlan :one
 INSERT INTO plans (name, timezone, daily_anchor, weekly_anchor, monthly_anchor)
 VALUES ($1, $2, $3, $4, $5)
@@ -194,6 +224,74 @@ func (q *Queries) GetUser(ctx context.Context, id string) (GetUserRow, error) {
 		&i.Email,
 		&i.Name,
 		&i.Username,
+		&i.Role,
+		&i.PlanID,
+		&i.PlanName,
+		&i.CreatedAt,
+		&i.DisabledAt,
+	)
+	return i, err
+}
+
+const getUserByEmail = `-- name: GetUserByEmail :one
+SELECT u.id, u.email, u.name, u.role, u.plan_id, p.name AS plan_name, u.created_at, u.disabled_at
+FROM users u
+JOIN plans p ON p.id = u.plan_id
+WHERE lower(u.email) = lower($1)
+`
+
+type GetUserByEmailRow struct {
+	ID         string
+	Email      string
+	Name       string
+	Role       string
+	PlanID     string
+	PlanName   string
+	CreatedAt  time.Time
+	DisabledAt *time.Time
+}
+
+func (q *Queries) GetUserByEmail(ctx context.Context, lower string) (GetUserByEmailRow, error) {
+	row := q.db.QueryRow(ctx, getUserByEmail, lower)
+	var i GetUserByEmailRow
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.Name,
+		&i.Role,
+		&i.PlanID,
+		&i.PlanName,
+		&i.CreatedAt,
+		&i.DisabledAt,
+	)
+	return i, err
+}
+
+const getUserByOIDCSubject = `-- name: GetUserByOIDCSubject :one
+SELECT u.id, u.email, u.name, u.role, u.plan_id, p.name AS plan_name, u.created_at, u.disabled_at
+FROM users u
+JOIN plans p ON p.id = u.plan_id
+WHERE u.oidc_subject = $1
+`
+
+type GetUserByOIDCSubjectRow struct {
+	ID         string
+	Email      string
+	Name       string
+	Role       string
+	PlanID     string
+	PlanName   string
+	CreatedAt  time.Time
+	DisabledAt *time.Time
+}
+
+func (q *Queries) GetUserByOIDCSubject(ctx context.Context, oidcSubject *string) (GetUserByOIDCSubjectRow, error) {
+	row := q.db.QueryRow(ctx, getUserByOIDCSubject, oidcSubject)
+	var i GetUserByOIDCSubjectRow
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.Name,
 		&i.Role,
 		&i.PlanID,
 		&i.PlanName,
@@ -581,6 +679,32 @@ func (q *Queries) SetUserRole(ctx context.Context, arg SetUserRoleParams) (int64
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const updateOIDCUser = `-- name: UpdateOIDCUser :exec
+UPDATE users
+SET email = $1,
+    name = CASE WHEN $2::text <> '' THEN $2::text ELSE users.name END,
+    oidc_subject = COALESCE(oidc_subject, $3),
+    disabled_at = NULL
+WHERE id = $4
+`
+
+type UpdateOIDCUserParams struct {
+	Email       string
+	Name        string
+	OidcSubject *string
+	ID          string
+}
+
+func (q *Queries) UpdateOIDCUser(ctx context.Context, arg UpdateOIDCUserParams) error {
+	_, err := q.db.Exec(ctx, updateOIDCUser,
+		arg.Email,
+		arg.Name,
+		arg.OidcSubject,
+		arg.ID,
+	)
+	return err
 }
 
 const updatePlan = `-- name: UpdatePlan :execrows

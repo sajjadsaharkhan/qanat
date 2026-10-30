@@ -57,7 +57,7 @@ WHERE confirmed_at IS NOT NULL AND effective_from <= now()
 ORDER BY upstream_model, effective_from DESC, id DESC;
 
 -- name: SnapshotAccounts :many
-SELECT id, provider, base_url, credentials, state, cooldown_until
+SELECT id, provider, base_url, credentials, state, cooldown_until, auth_kind, disabled_at, proxy_id, proxy_group_id, proxy_direct
 FROM provider_accounts
 ORDER BY position;
 
@@ -71,3 +71,17 @@ SELECT gen FROM config_generation;
 -- name: UpsertStickyBinding :exec
 INSERT INTO sticky_bindings (user_id, provider, account_id) VALUES ($1, $2, $3)
 ON CONFLICT (user_id, provider) DO UPDATE SET account_id = EXCLUDED.account_id, updated_at = now();
+
+-- name: SnapshotProxies :many
+SELECT id, type, host, port, username, password, enabled, is_default
+FROM proxies;
+
+-- name: SnapshotProxyGroups :many
+SELECT g.id, g.policy, m.proxy_id
+FROM proxy_groups g
+JOIN proxy_group_members m ON m.group_id = g.id
+ORDER BY g.id, m.priority, m.proxy_id;
+
+-- name: SnapshotProviderProxies :many
+SELECT provider, proxy_id, proxy_group_id, proxy_direct
+FROM provider_proxies;

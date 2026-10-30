@@ -13,7 +13,7 @@ import (
 )
 
 const snapshotAccounts = `-- name: SnapshotAccounts :many
-SELECT id, provider, base_url, credentials, state, cooldown_until
+SELECT id, provider, base_url, credentials, state, cooldown_until, auth_kind, disabled_at, proxy_id, proxy_group_id, proxy_direct
 FROM provider_accounts
 ORDER BY position
 `
@@ -25,6 +25,11 @@ type SnapshotAccountsRow struct {
 	Credentials   []byte
 	State         string
 	CooldownUntil *time.Time
+	AuthKind      string
+	DisabledAt    *time.Time
+	ProxyID       *string
+	ProxyGroupID  *string
+	ProxyDirect   bool
 }
 
 func (q *Queries) SnapshotAccounts(ctx context.Context) ([]SnapshotAccountsRow, error) {
@@ -43,6 +48,11 @@ func (q *Queries) SnapshotAccounts(ctx context.Context) ([]SnapshotAccountsRow, 
 			&i.Credentials,
 			&i.State,
 			&i.CooldownUntil,
+			&i.AuthKind,
+			&i.DisabledAt,
+			&i.ProxyID,
+			&i.ProxyGroupID,
+			&i.ProxyDirect,
 		); err != nil {
 			return nil, err
 		}
@@ -391,6 +401,114 @@ func (q *Queries) SnapshotPrices(ctx context.Context) ([]SnapshotPricesRow, erro
 			&i.PCacheRead,
 			&i.PCacheWrite,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const snapshotProviderProxies = `-- name: SnapshotProviderProxies :many
+SELECT provider, proxy_id, proxy_group_id, proxy_direct
+FROM provider_proxies
+`
+
+func (q *Queries) SnapshotProviderProxies(ctx context.Context) ([]ProviderProxy, error) {
+	rows, err := q.db.Query(ctx, snapshotProviderProxies)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ProviderProxy{}
+	for rows.Next() {
+		var i ProviderProxy
+		if err := rows.Scan(
+			&i.Provider,
+			&i.ProxyID,
+			&i.ProxyGroupID,
+			&i.ProxyDirect,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const snapshotProxies = `-- name: SnapshotProxies :many
+SELECT id, type, host, port, username, password, enabled, is_default
+FROM proxies
+`
+
+type SnapshotProxiesRow struct {
+	ID        string
+	Type      string
+	Host      string
+	Port      int32
+	Username  *string
+	Password  []byte
+	Enabled   bool
+	IsDefault bool
+}
+
+func (q *Queries) SnapshotProxies(ctx context.Context) ([]SnapshotProxiesRow, error) {
+	rows, err := q.db.Query(ctx, snapshotProxies)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SnapshotProxiesRow{}
+	for rows.Next() {
+		var i SnapshotProxiesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Type,
+			&i.Host,
+			&i.Port,
+			&i.Username,
+			&i.Password,
+			&i.Enabled,
+			&i.IsDefault,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const snapshotProxyGroups = `-- name: SnapshotProxyGroups :many
+SELECT g.id, g.policy, m.proxy_id
+FROM proxy_groups g
+JOIN proxy_group_members m ON m.group_id = g.id
+ORDER BY g.id, m.priority, m.proxy_id
+`
+
+type SnapshotProxyGroupsRow struct {
+	ID      string
+	Policy  string
+	ProxyID string
+}
+
+func (q *Queries) SnapshotProxyGroups(ctx context.Context) ([]SnapshotProxyGroupsRow, error) {
+	rows, err := q.db.Query(ctx, snapshotProxyGroups)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SnapshotProxyGroupsRow{}
+	for rows.Next() {
+		var i SnapshotProxyGroupsRow
+		if err := rows.Scan(&i.ID, &i.Policy, &i.ProxyID); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

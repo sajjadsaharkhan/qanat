@@ -1,12 +1,38 @@
 -- Admin API: provider accounts, model mapping, prices (PRD §6, §10.1).
 
 -- name: ListAccounts :many
-SELECT id, provider, label, base_url, (credentials IS NOT NULL)::boolean AS has_credentials, state, cooldown_until, created_at
+SELECT id, provider, label, base_url, (credentials IS NOT NULL)::boolean AS has_credentials, state, cooldown_until, created_at,
+       auth_kind, expires_at, disabled_at, last_check_at, last_check_ok, last_check_error, position,
+       proxy_id, proxy_group_id, proxy_direct
 FROM provider_accounts
 ORDER BY position;
 
+-- name: GetAccountAdmin :one
+SELECT id, provider, label, base_url, credentials, state, cooldown_until,
+       auth_kind, expires_at, disabled_at, proxy_id, proxy_group_id, proxy_direct
+FROM provider_accounts
+WHERE id = $1;
+
 -- name: CreateAccount :exec
-INSERT INTO provider_accounts (id, provider, label, base_url, credentials) VALUES ($1, $2, $3, $4, $5);
+INSERT INTO provider_accounts (id, provider, label, base_url, credentials, auth_kind, expires_at, position, proxy_id, proxy_group_id, proxy_direct)
+VALUES ($1, $2, $3, $4, $5, $6, $7, (SELECT coalesce(max(position), 0) + 1 FROM provider_accounts), $8, $9, $10);
+
+-- name: SetAccountProxy :execrows
+UPDATE provider_accounts SET proxy_id = $2, proxy_group_id = $3, proxy_direct = $4 WHERE id = $1;
+
+-- name: UpdateAccountCore :execrows
+UPDATE provider_accounts
+SET label = $2, base_url = $3, auth_kind = $4, expires_at = $5, credentials = $6, disabled_at = $7
+WHERE id = $1;
+
+-- name: SetAccountCheckResult :exec
+UPDATE provider_accounts SET last_check_at = $2, last_check_ok = $3, last_check_error = $4 WHERE id = $1;
+
+-- name: AccountPositions :many
+SELECT id, position FROM provider_accounts WHERE provider = $1 ORDER BY position;
+
+-- name: SetAccountPosition :execrows
+UPDATE provider_accounts SET position = $2 WHERE id = $1;
 
 -- name: DeleteAccount :execrows
 DELETE FROM provider_accounts WHERE id = $1;
@@ -47,10 +73,10 @@ WHERE user_id = $1;
 
 -- Aggregation worker (D17, D18): one upsert per level.
 -- name: UpsertUsage5m :exec
-INSERT INTO usage_5m (bucket_start, user_id, key_id, provider, upstream_model, aborted, price_version,
+INSERT INTO usage_5m (bucket_start, user_id, key_id, provider, upstream_model, account_id, aborted, price_version,
                       input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, request_count)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1)
-ON CONFLICT (bucket_start, user_id, key_id, provider, upstream_model, aborted, price_version) DO UPDATE SET
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 1)
+ON CONFLICT (bucket_start, user_id, key_id, provider, upstream_model, account_id, aborted, price_version) DO UPDATE SET
     input_tokens = usage_5m.input_tokens + EXCLUDED.input_tokens,
     output_tokens = usage_5m.output_tokens + EXCLUDED.output_tokens,
     cache_read_tokens = usage_5m.cache_read_tokens + EXCLUDED.cache_read_tokens,
@@ -59,10 +85,10 @@ ON CONFLICT (bucket_start, user_id, key_id, provider, upstream_model, aborted, p
     request_count = usage_5m.request_count + 1;
 
 -- name: UpsertUsageHourly :exec
-INSERT INTO usage_hourly (bucket_start, user_id, key_id, provider, upstream_model, aborted, price_version,
+INSERT INTO usage_hourly (bucket_start, user_id, key_id, provider, upstream_model, account_id, aborted, price_version,
                           input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, request_count)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1)
-ON CONFLICT (bucket_start, user_id, key_id, provider, upstream_model, aborted, price_version) DO UPDATE SET
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 1)
+ON CONFLICT (bucket_start, user_id, key_id, provider, upstream_model, account_id, aborted, price_version) DO UPDATE SET
     input_tokens = usage_hourly.input_tokens + EXCLUDED.input_tokens,
     output_tokens = usage_hourly.output_tokens + EXCLUDED.output_tokens,
     cache_read_tokens = usage_hourly.cache_read_tokens + EXCLUDED.cache_read_tokens,
@@ -71,10 +97,10 @@ ON CONFLICT (bucket_start, user_id, key_id, provider, upstream_model, aborted, p
     request_count = usage_hourly.request_count + 1;
 
 -- name: UpsertUsageDaily :exec
-INSERT INTO usage_daily (bucket_start, user_id, key_id, provider, upstream_model, aborted, price_version,
+INSERT INTO usage_daily (bucket_start, user_id, key_id, provider, upstream_model, account_id, aborted, price_version,
                          input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, request_count)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1)
-ON CONFLICT (bucket_start, user_id, key_id, provider, upstream_model, aborted, price_version) DO UPDATE SET
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 1)
+ON CONFLICT (bucket_start, user_id, key_id, provider, upstream_model, account_id, aborted, price_version) DO UPDATE SET
     input_tokens = usage_daily.input_tokens + EXCLUDED.input_tokens,
     output_tokens = usage_daily.output_tokens + EXCLUDED.output_tokens,
     cache_read_tokens = usage_daily.cache_read_tokens + EXCLUDED.cache_read_tokens,
