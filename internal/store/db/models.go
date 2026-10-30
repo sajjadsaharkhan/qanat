@@ -66,7 +66,7 @@ type ModelMapping struct {
 
 type ModelPrice struct {
 	ID            int64
-	UpstreamModel string
+	ModelID       string
 	PIn           float64
 	POut          float64
 	PCacheRead    float64
@@ -75,6 +75,7 @@ type ModelPrice struct {
 	ConfirmedBy   *string
 	ConfirmedAt   *time.Time
 	CreatedAt     time.Time
+	Source        string
 }
 
 type Plan struct {

@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"qanat/internal/core/oauth"
+	"qanat/internal/core/pricing"
 	"qanat/internal/core/provider"
 	"qanat/internal/proxy"
 	"qanat/internal/store/db"
@@ -755,22 +756,24 @@ func (s *Server) listProviders(w http.ResponseWriter, _ *http.Request, _ *db.Get
 // --- prices (REQ-PRICE-01…03) ----------------------------------------------------
 
 type priceRequest struct {
-	UpstreamModel string  `json:"upstream_model"`
-	PIn           float64 `json:"p_in"`
-	POut          float64 `json:"p_out"`
-	PCacheRead    float64 `json:"p_cache_read"`
-	PCacheWrite   float64 `json:"p_cache_write"`
+	ModelID     string  `json:"model_id"`
+	PIn         float64 `json:"p_in"`
+	POut        float64 `json:"p_out"`
+	PCacheRead  float64 `json:"p_cache_read"`
+	PCacheWrite float64 `json:"p_cache_write"`
 }
 
 type priceResponse struct {
 	Version       int64      `json:"version"`
-	UpstreamModel string     `json:"upstream_model"`
+	ModelID       string     `json:"model_id"`
 	PIn           float64    `json:"p_in"`
 	POut          float64    `json:"p_out"`
 	PCacheRead    float64    `json:"p_cache_read"`
 	PCacheWrite   float64    `json:"p_cache_write"`
 	EffectiveFrom time.Time  `json:"effective_from"`
 	ConfirmedAt   *time.Time `json:"confirmed_at"`
+	Source        string     `json:"source"`      // "admin" or "default"
+	HasDefault    bool       `json:"has_default"` // deleting the admin price falls back to it
 }
 
 func (s *Server) listPrices(w http.ResponseWriter, r *http.Request, _ *db.GetUserRow) {
@@ -781,7 +784,7 @@ func (s *Server) listPrices(w http.ResponseWriter, r *http.Request, _ *db.GetUse
 	}
 	out := make([]priceResponse, 0, len(rows))
 	for _, p := range rows {
-		out = append(out, priceResponse{p.ID, p.UpstreamModel, p.PIn, p.POut, p.PCacheRead, p.PCacheWrite, p.EffectiveFrom, p.ConfirmedAt})
+		out = append(out, priceResponse{p.ID, p.ModelID, p.PIn, p.POut, p.PCacheRead, p.PCacheWrite, p.EffectiveFrom, p.ConfirmedAt, p.Source, p.HasDefault})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -793,20 +796,84 @@ func (s *Server) setPrice(w http.ResponseWriter, r *http.Request, actor *db.GetU
 	if !decode(w, r, &req) {
 		return
 	}
-	req.UpstreamModel = strings.TrimSpace(req.UpstreamModel)
-	if req.UpstreamModel == "" || req.PIn < 0 || req.POut < 0 || req.PCacheRead < 0 || req.PCacheWrite < 0 {
-		fail(w, http.StatusBadRequest, "invalid_price", "Give the upstream model name and non-negative prices per 1M tokens.")
+	// Prices are keyed by the provider's model id, which the gateway
+	// forwards; a prefix (cc/, cx/, ag/) only picks the provider.
+	req.ModelID = provider.Bare(strings.TrimSpace(req.ModelID))
+	if req.ModelID == "" || req.PIn < 0 || req.POut < 0 || req.PCacheRead < 0 || req.PCacheWrite < 0 {
+		fail(w, http.StatusBadRequest, "invalid_price", "Give a model id and non-negative prices per 1M tokens.")
+		return
+	}
+	ok, err := s.q.PriceableModel(r.Context(), req.ModelID)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	if !ok {
+		fail(w, http.StatusBadRequest, "unknown_model",
+			fmt.Sprintf("No provider lists the model %q. Sync the provider's catalog on the Models page, then pick the model from it.", req.ModelID))
 		return
 	}
 	v, err := s.q.InsertConfirmedPrice(r.Context(), db.InsertConfirmedPriceParams{
-		UpstreamModel: req.UpstreamModel, PIn: req.PIn, POut: req.POut, PCacheRead: req.PCacheRead, PCacheWrite: req.PCacheWrite, ConfirmedBy: &actor.ID,
+		ModelID: req.ModelID, PIn: req.PIn, POut: req.POut, PCacheRead: req.PCacheRead, PCacheWrite: req.PCacheWrite, ConfirmedBy: &actor.ID,
 	})
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
-	s.audit(r.Context(), &actor.ID, "price.set", "price", req.UpstreamModel, nil, req)
+	s.audit(r.Context(), &actor.ID, "price.set", "price", req.ModelID, nil, req)
 	writeJSON(w, http.StatusCreated, map[string]int64{"version": v})
+}
+
+// deletePrice removes a model's admin price, so the built-in default (if
+// any) applies again; without one the model becomes unusable (D13).
+func (s *Server) deletePrice(w http.ResponseWriter, r *http.Request, actor *db.GetUserRow) {
+	model := provider.Bare(r.PathValue("model"))
+	n, err := s.q.DeleteAdminPrices(r.Context(), model)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	if n == 0 {
+		fail(w, http.StatusNotFound, "not_found", "That model has no admin price. Built-in prices can be overridden but not deleted.")
+		return
+	}
+	s.audit(r.Context(), &actor.ID, "price.delete", "price", model, nil, nil)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// syncDefaultPrices writes a 'default' price version for every built-in
+// price that is new or changed since the last sync, so editing the table
+// and restarting is how defaults are updated (REQ-PRICE-01 still holds: each
+// change is a new version). Replicas starting together serialize on a lock.
+func (s *Server) syncDefaultPrices(ctx context.Context) error {
+	tx, err := s.pg.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('qanat.default_prices'))`); err != nil {
+		return err
+	}
+	q := s.q.WithTx(tx)
+	rows, err := q.LatestDefaultPrices(ctx)
+	if err != nil {
+		return err
+	}
+	have := make(map[string]pricing.Price, len(rows))
+	for _, p := range rows {
+		have[p.ModelID] = pricing.Price{In: p.PIn, Out: p.POut, CacheRead: p.PCacheRead, CacheWrite: p.PCacheWrite}
+	}
+	for model, p := range pricing.Defaults {
+		if cur, ok := have[model]; ok && cur == p {
+			continue
+		}
+		if err := q.InsertDefaultPrice(ctx, db.InsertDefaultPriceParams{
+			ModelID: model, PIn: p.In, POut: p.Out, PCacheRead: p.CacheRead, PCacheWrite: p.CacheWrite,
+		}); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
 }
 
 // --- usage -----------------------------------------------------------------------

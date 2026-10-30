@@ -580,9 +580,26 @@ export interface paths {
         };
         get: operations["listPrices"];
         put?: never;
-        /** Add a confirmed price version, effective now */
+        /** Add a confirmed price version, effective now. The model must be in a provider catalog or already priced */
         post: operations["setPrice"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/prices/{model}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove a model's admin price; its built-in default (if any) applies again */
+        delete: operations["deletePrice"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1207,7 +1224,15 @@ export interface components {
         Price: {
             /** Format: int64 */
             version: number;
-            upstream_model: string;
+            /** @description The provider's model id (as in its catalog), never provider-prefixed */
+            model_id: string;
+            /**
+             * @description default: built-in price (after 9router); admin: set by an admin, always wins
+             * @enum {string}
+             */
+            source: "admin" | "default";
+            /** @description Deleting the admin price falls back to a built-in default */
+            has_default: boolean;
             p_in: number;
             p_out: number;
             p_cache_read: number;
@@ -1218,7 +1243,8 @@ export interface components {
             confirmed_at: string | null;
         };
         PriceRequest: {
-            upstream_model: string;
+            /** @description A model id a provider's catalog lists, or one that already has a price; a provider prefix (cc/, cx/, ag/) is removed */
+            model_id: string;
             /** @description USD per 1M input tokens */
             p_in: number;
             p_out: number;
@@ -2349,6 +2375,28 @@ export interface operations {
                 };
             };
             400: components["responses"]["Error"];
+        };
+    };
+    deletePrice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Model id */
+                model: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
         };
     };
     listUsers: {

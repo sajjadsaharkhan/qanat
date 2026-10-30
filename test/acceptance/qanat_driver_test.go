@@ -205,7 +205,11 @@ func (d *qanatDriver) SetMapping(ctx context.Context, rules []MappingRule) error
 }
 
 func (d *qanatDriver) SetPrice(ctx context.Context, model string, p Price) error {
-	body := map[string]any{"upstream_model": model, "p_in": p.Input, "p_out": p.Output, "p_cache_read": p.CacheRead, "p_cache_write": p.CacheWrite}
+	// Only models a provider's catalog lists can be priced.
+	if err := d.call(ctx, http.MethodPost, "/test/provider-models", "", map[string]any{"provider": "claude", "model": model}, nil); err != nil {
+		return err
+	}
+	body := map[string]any{"model_id": model, "p_in": p.Input, "p_out": p.Output, "p_cache_read": p.CacheRead, "p_cache_write": p.CacheWrite}
 	if err := d.call(ctx, http.MethodPost, "/api/admin/prices", d.admin, body, nil); err != nil {
 		return err
 	}

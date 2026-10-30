@@ -46,15 +46,16 @@ FROM combos c
 JOIN combo_members m ON m.combo_id = c.id
 ORDER BY c.id, m.position;
 
--- Latest confirmed price per model that is already in effect. A model whose
--- newest row is unconfirmed keeps its last confirmed price; a model with no
--- confirmed price at all is absent, which makes it unusable (D13).
+-- Latest confirmed price per model that is already in effect; an admin price
+-- beats a built-in default whatever their dates. A model whose newest row is
+-- unconfirmed keeps its last confirmed price; a model with no confirmed price
+-- at all is absent, which makes it unusable (D13).
 -- name: SnapshotPrices :many
-SELECT DISTINCT ON (upstream_model)
-       id, upstream_model, p_in, p_out, p_cache_read, p_cache_write
+SELECT DISTINCT ON (model_id)
+       id, model_id, p_in, p_out, p_cache_read, p_cache_write
 FROM model_prices
 WHERE confirmed_at IS NOT NULL AND effective_from <= now()
-ORDER BY upstream_model, effective_from DESC, id DESC;
+ORDER BY model_id, (source = 'admin') DESC, effective_from DESC, id DESC;
 
 -- name: SnapshotAccounts :many
 SELECT id, provider, base_url, credentials, state, cooldown_until, auth_kind, disabled_at, proxy_id, proxy_group_id, proxy_direct

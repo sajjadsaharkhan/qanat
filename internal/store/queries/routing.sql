@@ -74,17 +74,42 @@ DELETE FROM model_mappings;
 INSERT INTO model_mappings (pattern, is_glob, target_kind, provider, upstream_model, priority)
 VALUES ($1, $2, 'model', $3, $4, $5);
 
--- Newest price row per model, confirmed or proposed.
+-- Newest price row per model, confirmed or proposed; admin rows first, as
+-- in SnapshotPrices. has_default says whether deleting the admin rows falls
+-- back to a built-in price.
 -- name: ListPrices :many
-SELECT DISTINCT ON (upstream_model)
-       id, upstream_model, p_in, p_out, p_cache_read, p_cache_write, effective_from, confirmed_at
-FROM model_prices
-ORDER BY upstream_model, effective_from DESC, id DESC;
+SELECT DISTINCT ON (p.model_id)
+       p.id, p.model_id, p.p_in, p.p_out, p.p_cache_read, p.p_cache_write, p.effective_from, p.confirmed_at, p.source,
+       EXISTS (SELECT 1 FROM model_prices d WHERE d.model_id = p.model_id AND d.source = 'default') AS has_default
+FROM model_prices p
+ORDER BY p.model_id, (p.source = 'admin') DESC, p.effective_from DESC, p.id DESC;
 
 -- name: InsertConfirmedPrice :one
-INSERT INTO model_prices (upstream_model, p_in, p_out, p_cache_read, p_cache_write, confirmed_by, confirmed_at)
+INSERT INTO model_prices (model_id, p_in, p_out, p_cache_read, p_cache_write, confirmed_by, confirmed_at)
 VALUES ($1, $2, $3, $4, $5, $6, now())
 RETURNING id;
+
+-- Removes every admin version of a model's price. Usage aggregates keep
+-- their stored cost and price_version, so past cost is unchanged.
+-- A price can be set only for a model a provider's catalog lists, or one
+-- that already has a price (a built-in default or an earlier admin price).
+-- name: PriceableModel :one
+SELECT (EXISTS (SELECT 1 FROM provider_models WHERE model = $1)
+    OR EXISTS (SELECT 1 FROM model_prices WHERE model_id = $1))::boolean AS ok;
+
+-- name: DeleteAdminPrices :execrows
+DELETE FROM model_prices WHERE model_id = $1 AND source = 'admin';
+
+-- name: LatestDefaultPrices :many
+SELECT DISTINCT ON (model_id)
+       model_id, p_in, p_out, p_cache_read, p_cache_write
+FROM model_prices
+WHERE source = 'default'
+ORDER BY model_id, effective_from DESC, id DESC;
+
+-- name: InsertDefaultPrice :exec
+INSERT INTO model_prices (model_id, p_in, p_out, p_cache_read, p_cache_write, source, confirmed_at)
+VALUES ($1, $2, $3, $4, $5, 'default', now());
 
 -- name: UserUsageTotals :one
 SELECT coalesce(sum(input_tokens), 0)::bigint       AS input_tokens,

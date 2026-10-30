@@ -382,7 +382,7 @@ func build(ctx context.Context, q *db.Queries, box *secretbox.Box, log *slog.Log
 		return nil, err
 	}
 	for _, p := range prices {
-		s.prices[p.UpstreamModel] = Price{Version: p.ID, In: p.PIn, Out: p.POut, CRead: p.PCacheRead, CWrite: p.PCacheWrite}
+		s.prices[p.ModelID] = Price{Version: p.ID, In: p.PIn, Out: p.POut, CRead: p.PCacheRead, CWrite: p.PCacheWrite}
 	}
 
 	proxies, err := q.SnapshotProxies(ctx)

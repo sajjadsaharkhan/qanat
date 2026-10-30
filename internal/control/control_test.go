@@ -14,9 +14,11 @@ import (
 	"time"
 
 	"qanat/internal/core/apikey"
+	"qanat/internal/core/pricing"
 	"qanat/internal/core/quota"
 	"qanat/internal/core/secretbox"
 	"qanat/internal/platform"
+	"qanat/internal/store/db"
 	"qanat/internal/store/storetest"
 	"qanat/internal/testkit/itenv"
 	"qanat/internal/testkit/oidctest"
@@ -427,6 +429,83 @@ func TestMappings_ProvidersAndPrefixedPatterns(t *testing.T) {
 	var rules []mappingRule
 	if h.do(c, "GET", "/api/admin/mappings", "", &rules); len(rules) != 1 || rules[0].Pattern != "opus" {
 		t.Fatalf("rules: %+v", rules)
+	}
+}
+
+// Prices: built-in defaults are listed without setup; a prefixed name is
+// priced under its bare id; an admin price overrides the default and
+// deleting it falls back; only catalog models can get a custom price, and
+// one with no default can be deleted.
+// A second sync writes nothing new.
+func TestPrices_DefaultsOverrideDelete(t *testing.T) {
+	h := newHarness(t)
+	c := h.signInRoot()
+	byModel := func() map[string]priceResponse {
+		var ps []priceResponse
+		if st := h.do(c, "GET", "/api/admin/prices", "", &ps); st != 200 {
+			t.Fatalf("list prices: %d", st)
+		}
+		m := map[string]priceResponse{}
+		for _, p := range ps {
+			m[p.ModelID] = p
+		}
+		return m
+	}
+
+	def := pricing.Defaults["claude-opus-5-5"]
+	if p := byModel()["claude-opus-5-5"]; p.Source != "default" || p.PIn != def.In || p.ConfirmedAt == nil || !p.HasDefault {
+		t.Fatalf("built-in opus 5.5: %+v", p)
+	}
+
+	if st := h.do(c, "POST", "/api/admin/prices", `{"model_id":"cc/claude-opus-5-5","p_in":3,"p_out":15,"p_cache_read":0.3,"p_cache_write":3.75}`, nil); st != 201 {
+		t.Fatalf("set prefixed price: %d", st)
+	}
+	got := byModel()
+	if _, ok := got["cc/claude-opus-5-5"]; ok {
+		t.Fatal("price stored under the prefixed name")
+	}
+	if p := got["claude-opus-5-5"]; p.Source != "admin" || p.PIn != 3 || !p.HasDefault {
+		t.Fatalf("override: %+v", p)
+	}
+
+	if st := h.do(c, "DELETE", "/api/admin/prices/claude-opus-5-5", "", nil); st != 204 {
+		t.Fatalf("delete override: %d", st)
+	}
+	if p := byModel()["claude-opus-5-5"]; p.Source != "default" || p.PIn != def.In {
+		t.Fatalf("after reset: %+v", p)
+	}
+	if st := h.do(c, "DELETE", "/api/admin/prices/claude-opus-5-5", "", nil); st != 404 {
+		t.Fatalf("delete built-in: %d", st)
+	}
+
+	custom := `{"model_id":"my-model","p_in":1,"p_out":2,"p_cache_read":0,"p_cache_write":0}`
+	if st := h.do(c, "POST", "/api/admin/prices", custom, nil); st != 400 {
+		t.Fatalf("price for an unlisted model: %d", st)
+	}
+	if err := h.s.q.InsertProviderModel(context.Background(), db.InsertProviderModelParams{Provider: "claude", Model: "my-model"}); err != nil {
+		t.Fatal(err)
+	}
+	if st := h.do(c, "POST", "/api/admin/prices", custom, nil); st != 201 {
+		t.Fatalf("set custom price: %d", st)
+	}
+	if p := byModel()["my-model"]; p.Source != "admin" || p.HasDefault {
+		t.Fatalf("custom: %+v", p)
+	}
+	if st := h.do(c, "DELETE", "/api/admin/prices/my-model", "", nil); st != 204 {
+		t.Fatalf("delete custom: %d", st)
+	}
+	if _, ok := byModel()["my-model"]; ok {
+		t.Fatal("custom price still listed")
+	}
+
+	var before, after int
+	h.s.pg.QueryRow(context.Background(), `SELECT count(*) FROM model_prices`).Scan(&before)
+	if err := h.s.syncDefaultPrices(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h.s.pg.QueryRow(context.Background(), `SELECT count(*) FROM model_prices`).Scan(&after)
+	if before != after || before != len(pricing.Defaults) {
+		t.Fatalf("resync wrote rows: %d -> %d (defaults %d)", before, after, len(pricing.Defaults))
 	}
 }
 

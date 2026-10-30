@@ -90,6 +90,18 @@ func (q *Queries) DeleteAccount(ctx context.Context, id string) (int64, error) {
 	return result.RowsAffected(), nil
 }
 
+const deleteAdminPrices = `-- name: DeleteAdminPrices :execrows
+DELETE FROM model_prices WHERE model_id = $1 AND source = 'admin'
+`
+
+func (q *Queries) DeleteAdminPrices(ctx context.Context, modelID string) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteAdminPrices, modelID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteMappings = `-- name: DeleteMappings :exec
 DELETE FROM model_mappings
 `
@@ -190,23 +202,23 @@ func (q *Queries) GetAccountAdmin(ctx context.Context, id string) (GetAccountAdm
 }
 
 const insertConfirmedPrice = `-- name: InsertConfirmedPrice :one
-INSERT INTO model_prices (upstream_model, p_in, p_out, p_cache_read, p_cache_write, confirmed_by, confirmed_at)
+INSERT INTO model_prices (model_id, p_in, p_out, p_cache_read, p_cache_write, confirmed_by, confirmed_at)
 VALUES ($1, $2, $3, $4, $5, $6, now())
 RETURNING id
 `
 
 type InsertConfirmedPriceParams struct {
-	UpstreamModel string
-	PIn           float64
-	POut          float64
-	PCacheRead    float64
-	PCacheWrite   float64
-	ConfirmedBy   *string
+	ModelID     string
+	PIn         float64
+	POut        float64
+	PCacheRead  float64
+	PCacheWrite float64
+	ConfirmedBy *string
 }
 
 func (q *Queries) InsertConfirmedPrice(ctx context.Context, arg InsertConfirmedPriceParams) (int64, error) {
 	row := q.db.QueryRow(ctx, insertConfirmedPrice,
-		arg.UpstreamModel,
+		arg.ModelID,
 		arg.PIn,
 		arg.POut,
 		arg.PCacheRead,
@@ -216,6 +228,30 @@ func (q *Queries) InsertConfirmedPrice(ctx context.Context, arg InsertConfirmedP
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const insertDefaultPrice = `-- name: InsertDefaultPrice :exec
+INSERT INTO model_prices (model_id, p_in, p_out, p_cache_read, p_cache_write, source, confirmed_at)
+VALUES ($1, $2, $3, $4, $5, 'default', now())
+`
+
+type InsertDefaultPriceParams struct {
+	ModelID     string
+	PIn         float64
+	POut        float64
+	PCacheRead  float64
+	PCacheWrite float64
+}
+
+func (q *Queries) InsertDefaultPrice(ctx context.Context, arg InsertDefaultPriceParams) error {
+	_, err := q.db.Exec(ctx, insertDefaultPrice,
+		arg.ModelID,
+		arg.PIn,
+		arg.POut,
+		arg.PCacheRead,
+		arg.PCacheWrite,
+	)
+	return err
 }
 
 const insertMapping = `-- name: InsertMapping :exec
@@ -254,6 +290,48 @@ type InsertProviderModelParams struct {
 func (q *Queries) InsertProviderModel(ctx context.Context, arg InsertProviderModelParams) error {
 	_, err := q.db.Exec(ctx, insertProviderModel, arg.Provider, arg.Model)
 	return err
+}
+
+const latestDefaultPrices = `-- name: LatestDefaultPrices :many
+SELECT DISTINCT ON (model_id)
+       model_id, p_in, p_out, p_cache_read, p_cache_write
+FROM model_prices
+WHERE source = 'default'
+ORDER BY model_id, effective_from DESC, id DESC
+`
+
+type LatestDefaultPricesRow struct {
+	ModelID     string
+	PIn         float64
+	POut        float64
+	PCacheRead  float64
+	PCacheWrite float64
+}
+
+func (q *Queries) LatestDefaultPrices(ctx context.Context) ([]LatestDefaultPricesRow, error) {
+	rows, err := q.db.Query(ctx, latestDefaultPrices)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []LatestDefaultPricesRow{}
+	for rows.Next() {
+		var i LatestDefaultPricesRow
+		if err := rows.Scan(
+			&i.ModelID,
+			&i.PIn,
+			&i.POut,
+			&i.PCacheRead,
+			&i.PCacheWrite,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listAccounts = `-- name: ListAccounts :many
@@ -376,24 +454,29 @@ func (q *Queries) ListMappings(ctx context.Context) ([]ListMappingsRow, error) {
 }
 
 const listPrices = `-- name: ListPrices :many
-SELECT DISTINCT ON (upstream_model)
-       id, upstream_model, p_in, p_out, p_cache_read, p_cache_write, effective_from, confirmed_at
-FROM model_prices
-ORDER BY upstream_model, effective_from DESC, id DESC
+SELECT DISTINCT ON (p.model_id)
+       p.id, p.model_id, p.p_in, p.p_out, p.p_cache_read, p.p_cache_write, p.effective_from, p.confirmed_at, p.source,
+       EXISTS (SELECT 1 FROM model_prices d WHERE d.model_id = p.model_id AND d.source = 'default') AS has_default
+FROM model_prices p
+ORDER BY p.model_id, (p.source = 'admin') DESC, p.effective_from DESC, p.id DESC
 `
 
 type ListPricesRow struct {
 	ID            int64
-	UpstreamModel string
+	ModelID       string
 	PIn           float64
 	POut          float64
 	PCacheRead    float64
 	PCacheWrite   float64
 	EffectiveFrom time.Time
 	ConfirmedAt   *time.Time
+	Source        string
+	HasDefault    bool
 }
 
-// Newest price row per model, confirmed or proposed.
+// Newest price row per model, confirmed or proposed; admin rows first, as
+// in SnapshotPrices. has_default says whether deleting the admin rows falls
+// back to a built-in price.
 func (q *Queries) ListPrices(ctx context.Context) ([]ListPricesRow, error) {
 	rows, err := q.db.Query(ctx, listPrices)
 	if err != nil {
@@ -405,13 +488,15 @@ func (q *Queries) ListPrices(ctx context.Context) ([]ListPricesRow, error) {
 		var i ListPricesRow
 		if err := rows.Scan(
 			&i.ID,
-			&i.UpstreamModel,
+			&i.ModelID,
 			&i.PIn,
 			&i.POut,
 			&i.PCacheRead,
 			&i.PCacheWrite,
 			&i.EffectiveFrom,
 			&i.ConfirmedAt,
+			&i.Source,
+			&i.HasDefault,
 		); err != nil {
 			return nil, err
 		}
@@ -473,6 +558,22 @@ func (q *Queries) MergeOAuthAccount(ctx context.Context, arg MergeOAuthAccountPa
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const priceableModel = `-- name: PriceableModel :one
+SELECT (EXISTS (SELECT 1 FROM provider_models WHERE model = $1)
+    OR EXISTS (SELECT 1 FROM model_prices WHERE model_id = $1))::boolean AS ok
+`
+
+// Removes every admin version of a model's price. Usage aggregates keep
+// their stored cost and price_version, so past cost is unchanged.
+// A price can be set only for a model a provider's catalog lists, or one
+// that already has a price (a built-in default or an earlier admin price).
+func (q *Queries) PriceableModel(ctx context.Context, model string) (bool, error) {
+	row := q.db.QueryRow(ctx, priceableModel, model)
+	var ok bool
+	err := row.Scan(&ok)
+	return ok, err
 }
 
 const replaceProviderModels = `-- name: ReplaceProviderModels :exec

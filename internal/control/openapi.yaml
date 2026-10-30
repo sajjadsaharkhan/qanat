@@ -416,13 +416,22 @@ paths:
           content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Price" } } } }
     post:
       operationId: setPrice
-      summary: Add a confirmed price version, effective now
+      summary: Add a confirmed price version, effective now. The model must be in a provider catalog or already priced
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/PriceRequest" } } }
       responses:
         "201": { description: Created, content: { application/json: { schema: { type: object, required: [version], properties: { version: { type: integer, format: int64 } } } } } }
         "400": { $ref: "#/components/responses/Error" }
+  /api/admin/prices/{model}:
+    delete:
+      operationId: deletePrice
+      summary: Remove a model's admin price; its built-in default (if any) applies again
+      parameters:
+        - { name: model, in: path, required: true, schema: { type: string }, description: Model id }
+      responses:
+        "204": { description: Deleted }
+        "404": { $ref: "#/components/responses/Error" }
   /api/admin/users:
     get:
       operationId: listUsers
@@ -1000,10 +1009,12 @@ components:
         priority: { type: integer, description: Lower first, among globs }
     Price:
       type: object
-      required: [version, upstream_model, p_in, p_out, p_cache_read, p_cache_write, effective_from, confirmed_at]
+      required: [version, model_id, p_in, p_out, p_cache_read, p_cache_write, effective_from, confirmed_at, source, has_default]
       properties:
         version: { type: integer, format: int64 }
-        upstream_model: { type: string }
+        model_id: { type: string, description: "The provider's model id (as in its catalog), never provider-prefixed" }
+        source: { type: string, enum: [admin, default], description: "default: built-in price (after 9router); admin: set by an admin, always wins" }
+        has_default: { type: boolean, description: Deleting the admin price falls back to a built-in default }
         p_in: { type: number }
         p_out: { type: number }
         p_cache_read: { type: number }
@@ -1012,9 +1023,9 @@ components:
         confirmed_at: { type: [string, "null"], format: date-time }
     PriceRequest:
       type: object
-      required: [upstream_model, p_in, p_out, p_cache_read, p_cache_write]
+      required: [model_id, p_in, p_out, p_cache_read, p_cache_write]
       properties:
-        upstream_model: { type: string }
+        model_id: { type: string, description: "A model id a provider's catalog lists, or one that already has a price; a provider prefix (cc/, cx/, ag/) is removed" }
         p_in: { type: number, minimum: 0, description: USD per 1M input tokens }
         p_out: { type: number, minimum: 0 }
         p_cache_read: { type: number, minimum: 0 }

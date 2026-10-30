@@ -280,7 +280,7 @@ func (s *seeder) postgres(tx pgx.Tx) (err error) {
 		{"gpt-5.5", 1.25, 10, 0.125, 0},
 	} {
 		var v int64
-		if err := tx.QueryRow(s.ctx, `INSERT INTO model_prices (upstream_model, p_in, p_out, p_cache_read, p_cache_write, effective_from, confirmed_by, confirmed_at)
+		if err := tx.QueryRow(s.ctx, `INSERT INTO model_prices (model_id, p_in, p_out, p_cache_read, p_cache_write, effective_from, confirmed_by, confirmed_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $6) RETURNING id`, p.model, p.in, p.out, p.cRead, p.cWrite, s.now.AddDate(0, 0, -30), admin).Scan(&v); err != nil {
 			return err
 		}

@@ -365,25 +365,26 @@ func (q *Queries) SnapshotPlans(ctx context.Context) ([]SnapshotPlansRow, error)
 }
 
 const snapshotPrices = `-- name: SnapshotPrices :many
-SELECT DISTINCT ON (upstream_model)
-       id, upstream_model, p_in, p_out, p_cache_read, p_cache_write
+SELECT DISTINCT ON (model_id)
+       id, model_id, p_in, p_out, p_cache_read, p_cache_write
 FROM model_prices
 WHERE confirmed_at IS NOT NULL AND effective_from <= now()
-ORDER BY upstream_model, effective_from DESC, id DESC
+ORDER BY model_id, (source = 'admin') DESC, effective_from DESC, id DESC
 `
 
 type SnapshotPricesRow struct {
-	ID            int64
-	UpstreamModel string
-	PIn           float64
-	POut          float64
-	PCacheRead    float64
-	PCacheWrite   float64
+	ID          int64
+	ModelID     string
+	PIn         float64
+	POut        float64
+	PCacheRead  float64
+	PCacheWrite float64
 }
 
-// Latest confirmed price per model that is already in effect. A model whose
-// newest row is unconfirmed keeps its last confirmed price; a model with no
-// confirmed price at all is absent, which makes it unusable (D13).
+// Latest confirmed price per model that is already in effect; an admin price
+// beats a built-in default whatever their dates. A model whose newest row is
+// unconfirmed keeps its last confirmed price; a model with no confirmed price
+// at all is absent, which makes it unusable (D13).
 func (q *Queries) SnapshotPrices(ctx context.Context) ([]SnapshotPricesRow, error) {
 	rows, err := q.db.Query(ctx, snapshotPrices)
 	if err != nil {
@@ -395,7 +396,7 @@ func (q *Queries) SnapshotPrices(ctx context.Context) ([]SnapshotPricesRow, erro
 		var i SnapshotPricesRow
 		if err := rows.Scan(
 			&i.ID,
-			&i.UpstreamModel,
+			&i.ModelID,
 			&i.PIn,
 			&i.POut,
 			&i.PCacheRead,

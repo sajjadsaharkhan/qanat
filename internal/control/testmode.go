@@ -3,6 +3,8 @@ package control
 import (
 	"net/http"
 	"strings"
+
+	"qanat/internal/store/db"
 )
 
 // Test-only endpoints (docs/testing.md "The qanat driver"). Registered only
@@ -21,6 +23,19 @@ func (s *Server) registerTestMode(mux *http.ServeMux) {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
+	// The mock upstream has no model list, so the driver registers the
+	// models it prices as if a catalog sync had listed them.
+	mux.HandleFunc("POST /test/provider-models", func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Provider, Model string }
+		if !decode(w, r, &req) {
+			return
+		}
+		if err := s.q.InsertProviderModel(r.Context(), db.InsertProviderModelParams{Provider: req.Provider, Model: req.Model}); err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("GET /test/generation", func(w http.ResponseWriter, r *http.Request) {
 		gen, err := s.q.SnapshotGeneration(r.Context())
 		if err != nil {
@@ -35,7 +50,7 @@ func (s *Server) registerTestMode(mux *http.ServeMux) {
 // config_generation (monotonic on purpose) are kept.
 var resetTables = []string{
 	"audit_log", "usage_5m", "usage_hourly", "usage_daily", "sticky_bindings", "provider_accounts", "proxies",
-	"model_prices", "model_mappings", "combo_members", "combos", "quota_grants", "api_keys",
+	"model_prices", "provider_models", "model_mappings", "combo_members", "combos", "quota_grants", "api_keys",
 	"users", "plan_models", "plan_limits", "plan_quotas", "plans",
 }
 

@@ -92,6 +92,9 @@ func New(pg *pgxpool.Pool, rdb *redis.Client, log *slog.Logger, opts Options) *S
 
 // Bootstrap prepares state the API relies on: the root user when enabled.
 func (s *Server) Bootstrap(ctx context.Context) error {
+	if err := s.syncDefaultPrices(ctx); err != nil {
+		return err
+	}
 	if s.opts.RootPassword == "" {
 		return nil
 	}
@@ -162,6 +165,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.Handle("POST /api/admin/providers/{provider}/models", admin(s.syncProviderModels))
 	mux.Handle("GET /api/admin/prices", admin(s.listPrices))
 	mux.Handle("POST /api/admin/prices", admin(s.setPrice))
+	mux.Handle("DELETE /api/admin/prices/{model}", admin(s.deletePrice))
 	mux.Handle("GET /api/me/requests", user(s.recentRequests))
 	mux.Handle("GET /api/me/usage", user(s.myUsage))
 	mux.Handle("GET /api/me/usage/overview", user(s.myUsageOverview))

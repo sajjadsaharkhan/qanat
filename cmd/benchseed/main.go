@@ -75,7 +75,7 @@ func main() {
 
 	call("POST", *control+"/api/admin/accounts", admin, map[string]any{"provider": "claude", "label": "bench mock", "base_url": *upstream}, nil)
 	call("PUT", *control+"/api/admin/mappings", admin, []map[string]any{{"pattern": "claude-*", "provider": "claude", "upstream_model": nil, "priority": 0}}, nil)
-	call("POST", *control+"/api/admin/prices", admin, map[string]any{"upstream_model": "claude-sonnet-4-6", "p_in": 3, "p_out": 15, "p_cache_read": 0.3, "p_cache_write": 3.75}, nil)
+	call("POST", *control+"/api/admin/prices", admin, map[string]any{"model_id": "claude-sonnet-4-6", "p_in": 3, "p_out": 15, "p_cache_read": 0.3, "p_cache_write": 3.75}, nil)
 	var plan struct{ ID string }
 	call("POST", *control+"/api/admin/plans", admin, map[string]any{
 		"name": "bench-" + suffix, "timezone": "UTC", "daily_anchor": "00:00", "weekly_anchor": 6, "monthly_anchor": 1,

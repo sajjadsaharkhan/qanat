@@ -15,6 +15,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -181,17 +182,22 @@ func (g *Gateway) resolve(w http.ResponseWriter, r *http.Request, c *caller, end
 		return fail(http.StatusNotFound, "not_found_error", fmt.Sprintf("Qanat has no model called %q.", name))
 	}
 	rt := &route{caller: c, name: name, body: body, mStart: s, mEnd: e}
+	var unpriced []string
 	for _, m := range t.Members {
 		if m.Model == "" {
 			m.Model = name
 		}
 		if _, ok := c.snap.prices[m.Model]; ok { // D13: unpriced models are unusable
 			rt.members = append(rt.members, m)
+		} else if !slices.Contains(unpriced, m.Model) {
+			unpriced = append(unpriced, m.Model)
 		}
 	}
 	if len(rt.members) == 0 {
+		// Name the upstream ids that need a price: that is what the admin
+		// prices, not the prefixed or mapped name the client sent.
 		return fail(http.StatusForbidden, "permission_error",
-			fmt.Sprintf("The model %q has no confirmed price yet, so it can't be used. Ask an admin to confirm its price.", name))
+			fmt.Sprintf("The model %q has no confirmed price yet, so it can't be used. Ask an admin to confirm a price for %s.", name, quoteAll(unpriced)))
 	}
 	return rt, true
 }
@@ -335,4 +341,13 @@ func (g *Gateway) persistSticky(userID, provider, accountID string) {
 			g.log.Warn("sticky binding not saved", "err", err)
 		}
 	}()
+}
+
+// quoteAll renders names as "a", "b".
+func quoteAll(names []string) string {
+	q := make([]string, len(names))
+	for i, n := range names {
+		q[i] = strconv.Quote(n)
+	}
+	return strings.Join(q, ", ")
 }
