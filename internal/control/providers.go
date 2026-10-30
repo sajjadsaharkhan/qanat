@@ -8,27 +8,70 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"qanat/internal/core/oauth"
 	"qanat/internal/core/provider"
 	"qanat/internal/proxy"
 	"qanat/internal/store/db"
 )
 
-// GET /api/admin/providers/{provider}/models — the provider's real model
-// catalog, fetched with a stored account's own credential. The Models page
-// otherwise only shows what admins have priced; this answers "what can this
-// provider actually serve right now".
+// GET /api/admin/providers/{provider}/models — the provider's stored catalog
+// (migration 0009). POST …/models/sync refreshes it from the provider itself
+// with a stored account's own credential and replaces the stored rows.
 func (s *Server) providerModels(w http.ResponseWriter, r *http.Request, _ *db.GetUserRow) {
 	providerID := r.PathValue("provider")
 	if !provider.Known(providerID) {
 		fail(w, http.StatusBadRequest, "invalid_provider", `Provider must be "claude", "codex" or "antigravity".`)
 		return
 	}
-	// First usable account with a credential, in pool order.
-	rows, err := s.q.ListAccounts(r.Context())
+	models, err := s.q.ListProviderModels(r.Context(), providerID)
 	if err != nil {
 		s.internal(w, r, err)
 		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"models": models})
+}
+
+func (s *Server) syncProviderModels(w http.ResponseWriter, r *http.Request, _ *db.GetUserRow) {
+	providerID := r.PathValue("provider")
+	if !provider.Known(providerID) {
+		fail(w, http.StatusBadRequest, "invalid_provider", `Provider must be "claude", "codex" or "antigravity".`)
+		return
+	}
+	models, errMsg, code := s.fetchProviderCatalog(r, providerID)
+	if errMsg != "" {
+		fail(w, code, "provider_catalog_failed", errMsg)
+		return
+	}
+	err := pgx.BeginFunc(r.Context(), s.pg, func(tx pgx.Tx) error {
+		q := s.q.WithTx(tx)
+		if err := q.ReplaceProviderModels(r.Context(), providerID); err != nil {
+			return err
+		}
+		for _, m := range models {
+			if err := q.InsertProviderModel(r.Context(), db.InsertProviderModelParams{Provider: providerID, Model: m}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	s.audit(r.Context(), nil, "provider.models.sync", "provider", providerID, nil, map[string]any{"count": len(models)})
+	writeJSON(w, http.StatusOK, map[string]any{"models": models})
+}
+
+// fetchProviderCatalog asks the provider, through the first usable account's
+// own credential and proxy. A non-empty returned message is a user-facing
+// failure with its status.
+func (s *Server) fetchProviderCatalog(r *http.Request, providerID string) (models []string, errMsg string, status int) {
+	// First usable account with a credential, in pool order.
+	rows, err := s.q.ListAccounts(r.Context())
+	if err != nil {
+		return nil, "", http.StatusInternalServerError
 	}
 	var pick db.ListAccountsRow
 	found := false
@@ -40,30 +83,24 @@ func (s *Server) providerModels(w http.ResponseWriter, r *http.Request, _ *db.Ge
 		}
 	}
 	if !found {
-		fail(w, http.StatusConflict, "no_account",
-			"No enabled account for this provider. Add and enable one, then load its catalog.")
-		return
+		return nil, "No enabled account for this provider. Add and enable one, then sync its catalog.", http.StatusConflict
 	}
 	admin, err := s.q.GetAccountAdmin(r.Context(), pick.ID)
 	if err != nil {
-		s.internal(w, r, err)
-		return
+		return nil, "", http.StatusInternalServerError
 	}
 	if s.opts.Box == nil {
-		fail(w, http.StatusConflict, "credentials_unreadable", "QANAT_MASTER_KEY isn't set on the server, so stored credentials can't be read.")
-		return
+		return nil, "QANAT_MASTER_KEY isn't set on the server, so stored credentials can't be read.", http.StatusConflict
 	}
 	plain, err := s.opts.Box.Open(admin.Credentials, []byte(admin.ID))
 	if err != nil {
-		fail(w, http.StatusConflict, "credentials_unreadable", "The stored credential can't be read with the current master key. Save the credential again.")
-		return
+		return nil, "The stored credential can't be read with the current master key. Save the credential again.", http.StatusConflict
 	}
 	var creds struct {
 		AccessToken string `json:"access_token"`
 	}
 	if err := json.Unmarshal(plain, &creds); err != nil || creds.AccessToken == "" {
-		fail(w, http.StatusConflict, "credentials_unreadable", "The stored credential can't be read with the current master key. Save the credential again.")
-		return
+		return nil, "The stored credential can't be read with the current master key. Save the credential again.", http.StatusConflict
 	}
 
 	base := deref(admin.BaseUrl)
@@ -74,33 +111,26 @@ func (s *Server) providerModels(w http.ResponseWriter, r *http.Request, _ *db.Ge
 	defer cancel()
 	req, err := modelsProbe(ctx, providerID, admin.AuthKind, creds.AccessToken, base)
 	if err != nil {
-		s.internal(w, r, err)
-		return
+		return nil, "", http.StatusInternalServerError
 	}
 	client := &http.Client{}
 	if spec := s.accountProxySpec(r.Context(), admin); spec != nil {
 		client.Transport = proxy.NewTransport(spec)
 	}
-	start := s.now()
 	resp, err := client.Do(req)
 	if err != nil {
-		fail(w, http.StatusBadGateway, "provider_unreachable", cleanUpstreamError(err))
-		return
+		return nil, cleanUpstreamError(err), http.StatusBadGateway
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 512<<10))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		fail(w, http.StatusBadGateway, "provider_refused", upstreamErrorMessage(resp.StatusCode, body))
-		return
+		return nil, upstreamErrorMessage(resp.StatusCode, body), http.StatusBadGateway
 	}
-	models, err := parseModelCatalog(providerID, body)
+	models, err = parseModelCatalog(providerID, body)
 	if err != nil {
-		fail(w, http.StatusBadGateway, "provider_unparseable", "The provider's model list couldn't be read: "+err.Error())
-		return
+		return nil, "The provider's model list couldn't be read: " + err.Error(), http.StatusBadGateway
 	}
-	s.audit(r.Context(), nil, "provider.models", "provider", providerID,
-		nil, map[string]any{"count": len(models), "latency_ms": time.Since(start).Milliseconds()})
-	writeJSON(w, http.StatusOK, map[string]any{"models": models})
+	return models, "", http.StatusOK
 }
 
 // modelsProbe builds the provider's own models-list request for a credential.

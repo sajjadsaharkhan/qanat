@@ -52,6 +52,16 @@ UPDATE provider_accounts SET position = $2 WHERE id = $1;
 -- name: DeleteAccount :execrows
 DELETE FROM provider_accounts WHERE id = $1;
 
+-- Stored provider catalogs (migration 0009), refreshed wholesale per provider.
+-- name: ListProviderModels :many
+SELECT model FROM provider_models WHERE provider = $1 ORDER BY model;
+
+-- name: ReplaceProviderModels :exec
+DELETE FROM provider_models WHERE provider = $1;
+
+-- name: InsertProviderModel :exec
+INSERT INTO provider_models (provider, model) VALUES ($1, $2) ON CONFLICT DO NOTHING;
+
 -- name: ListMappings :many
 SELECT pattern, is_glob, target_kind, provider, upstream_model, priority
 FROM model_mappings

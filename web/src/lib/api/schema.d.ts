@@ -411,10 +411,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The provider's real model catalog, fetched with a stored account's own credential */
+        /** The provider's stored model catalog */
         get: operations["providerModels"];
         put?: never;
-        post?: never;
+        /** Re-fetch the catalog from the provider itself (with a stored account's credential) and replace the stored rows */
+        post: operations["syncProviderModels"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1942,7 +1943,30 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The upstream model IDs, in the provider's order */
+            /** @description The stored upstream model IDs */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderModels"];
+                };
+            };
+            400: components["responses"]["Error"];
+        };
+    };
+    syncProviderModels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: components["schemas"]["Provider"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The fresh catalog */
             200: {
                 headers: {
                     [name: string]: unknown;

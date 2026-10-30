@@ -411,6 +411,35 @@ func (q *Queries) SnapshotPrices(ctx context.Context) ([]SnapshotPricesRow, erro
 	return items, nil
 }
 
+const snapshotProviderModels = `-- name: SnapshotProviderModels :many
+SELECT provider, model FROM provider_models
+`
+
+type SnapshotProviderModelsRow struct {
+	Provider string
+	Model    string
+}
+
+func (q *Queries) SnapshotProviderModels(ctx context.Context) ([]SnapshotProviderModelsRow, error) {
+	rows, err := q.db.Query(ctx, snapshotProviderModels)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SnapshotProviderModelsRow{}
+	for rows.Next() {
+		var i SnapshotProviderModelsRow
+		if err := rows.Scan(&i.Provider, &i.Model); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const snapshotProviderProxies = `-- name: SnapshotProviderProxies :many
 SELECT provider, proxy_id, proxy_group_id, proxy_direct
 FROM provider_proxies

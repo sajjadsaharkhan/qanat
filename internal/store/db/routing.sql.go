@@ -242,6 +242,20 @@ func (q *Queries) InsertMapping(ctx context.Context, arg InsertMappingParams) er
 	return err
 }
 
+const insertProviderModel = `-- name: InsertProviderModel :exec
+INSERT INTO provider_models (provider, model) VALUES ($1, $2) ON CONFLICT DO NOTHING
+`
+
+type InsertProviderModelParams struct {
+	Provider string
+	Model    string
+}
+
+func (q *Queries) InsertProviderModel(ctx context.Context, arg InsertProviderModelParams) error {
+	_, err := q.db.Exec(ctx, insertProviderModel, arg.Provider, arg.Model)
+	return err
+}
+
 const listAccounts = `-- name: ListAccounts :many
 
 SELECT id, provider, label, base_url, (credentials IS NOT NULL)::boolean AS has_credentials, state, cooldown_until, created_at,
@@ -409,6 +423,31 @@ func (q *Queries) ListPrices(ctx context.Context) ([]ListPricesRow, error) {
 	return items, nil
 }
 
+const listProviderModels = `-- name: ListProviderModels :many
+SELECT model FROM provider_models WHERE provider = $1 ORDER BY model
+`
+
+// Stored provider catalogs (migration 0009), refreshed wholesale per provider.
+func (q *Queries) ListProviderModels(ctx context.Context, provider string) ([]string, error) {
+	rows, err := q.db.Query(ctx, listProviderModels, provider)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var model string
+		if err := rows.Scan(&model); err != nil {
+			return nil, err
+		}
+		items = append(items, model)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const mergeOAuthAccount = `-- name: MergeOAuthAccount :execrows
 UPDATE provider_accounts
 SET credentials = $2, expires_at = $3, auth_kind = 'oauth', email = $4,
@@ -434,6 +473,15 @@ func (q *Queries) MergeOAuthAccount(ctx context.Context, arg MergeOAuthAccountPa
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const replaceProviderModels = `-- name: ReplaceProviderModels :exec
+DELETE FROM provider_models WHERE provider = $1
+`
+
+func (q *Queries) ReplaceProviderModels(ctx context.Context, provider string) error {
+	_, err := q.db.Exec(ctx, replaceProviderModels, provider)
+	return err
 }
 
 const setAccountCheckResult = `-- name: SetAccountCheckResult :exec

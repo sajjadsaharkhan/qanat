@@ -132,6 +132,12 @@ type ProviderAccount struct {
 	LastRefreshError *string
 }
 
+type ProviderModel struct {
+	Provider  string
+	Model     string
+	FetchedAt time.Time
+}
+
 type ProviderProxy struct {
 	Provider     string
 	ProxyID      *string

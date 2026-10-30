@@ -159,6 +159,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.Handle("PUT /api/admin/mappings", admin(s.replaceMappings))
 	mux.Handle("GET /api/admin/providers", admin(s.listProviders))
 	mux.Handle("GET /api/admin/providers/{provider}/models", admin(s.providerModels))
+	mux.Handle("POST /api/admin/providers/{provider}/models", admin(s.syncProviderModels))
 	mux.Handle("GET /api/admin/prices", admin(s.listPrices))
 	mux.Handle("POST /api/admin/prices", admin(s.setPrice))
 	mux.Handle("GET /api/me/requests", user(s.recentRequests))

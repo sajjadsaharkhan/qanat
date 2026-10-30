@@ -36,8 +36,11 @@ type Snapshot struct {
 	combos   []*Combo
 	prices   map[string]Price
 	accounts map[string][]*Account // provider → accounts in registration order
-	sticky   map[string]string     // user|provider → account ID
-	proxyIDs map[string]bool       // proxies some account routes through
+	// providerModels is each provider's stored catalog (migration 0009),
+	// synced from the provider itself; /v1/models lists these prefixed.
+	providerModels map[string][]string
+	sticky         map[string]string // user|provider → account ID
+	proxyIDs       map[string]bool   // proxies some account routes through
 }
 
 // Key is a personal API key (hash lookup only).
@@ -167,6 +170,19 @@ func (s *Snapshot) match(name string) (Target, bool) {
 	return Target{}, false
 }
 
+// serves reports whether the pool holds an account for the provider that can
+// take traffic: not admin-disabled, not disconnected. Cooldowns don't count —
+// they clear on their own. Disabled accounts stay in the snapshot so
+// re-enabling is instant, but their provider's names stop being advertised.
+func (s *Snapshot) serves(providerID string) bool {
+	for _, a := range s.accounts[providerID] {
+		if !a.Disabled && a.State != "disconnected" {
+			return true
+		}
+	}
+	return false
+}
+
 // Allowed reports whether a Plan and key allow a Qanat name (REQ-ACCESS-01).
 // A prefixed name is allowed when either it or its bare name is, so a Plan
 // that lists "sonnet" also admits "cc/sonnet".
@@ -198,12 +214,22 @@ func (s *Snapshot) ModelNames(p *Plan, k *Key) []string {
 		if _, ok := s.Resolve(m); ok {
 			add(m)
 		}
-		// Prefixed names for each provider with an account that serves the
-		// model's family, as 9router lists "cc/…" and "cx/…" (REQ-MAP-04).
+		// Prefixed names for each provider with a usable account that serves
+		// the model's family, as 9router lists "cc/…" and "cx/…" (REQ-MAP-04).
 		for _, pv := range provider.All {
-			if len(s.accounts[pv.ID]) > 0 && pv.Serves(m) {
+			if s.serves(pv.ID) && pv.Serves(m) {
 				add(pv.Prefix + "/" + m)
 			}
+		}
+	}
+	// Stored provider catalogs, prefixed: what the provider itself says it
+	// serves, when it has a usable account.
+	for _, pv := range provider.All {
+		if !s.serves(pv.ID) {
+			continue
+		}
+		for _, m := range s.providerModels[pv.ID] {
+			add(pv.Prefix + "/" + m)
 		}
 	}
 	return out
@@ -227,7 +253,7 @@ func build(ctx context.Context, q *db.Queries, box *secretbox.Box, log *slog.Log
 	s := &Snapshot{
 		LoadedAt: time.Now(), keys: map[[32]byte]*Key{}, users: map[string]*User{}, plans: map[string]*Plan{},
 		grants: map[string]int64{}, exact: map[string]Target{}, prices: map[string]Price{},
-		accounts: map[string][]*Account{}, sticky: map[string]string{}, proxyIDs: map[string]bool{},
+		accounts: map[string][]*Account{}, providerModels: map[string][]string{}, sticky: map[string]string{}, proxyIDs: map[string]bool{},
 	}
 	var err error
 	if s.Gen, err = q.SnapshotGeneration(ctx); err != nil {
@@ -464,6 +490,14 @@ func build(ctx context.Context, q *db.Queries, box *secretbox.Box, log *slog.Log
 	}
 	for _, b := range sticky {
 		s.sticky[b.UserID+"|"+b.Provider] = b.AccountID
+	}
+
+	catalog, err := q.SnapshotProviderModels(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range catalog {
+		s.providerModels[m.Provider] = append(s.providerModels[m.Provider], m.Model)
 	}
 	return s, nil
 }

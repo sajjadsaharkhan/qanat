@@ -268,13 +268,21 @@ paths:
   /api/admin/providers/{provider}/models:
     get:
       operationId: providerModels
-      summary: The provider's real model catalog, fetched with a stored account's own credential
+      summary: The provider's stored model catalog
       parameters:
         - { name: provider, in: path, required: true, schema: { $ref: "#/components/schemas/Provider" } }
       responses:
         "200":
-          description: The upstream model IDs, in the provider's order
+          description: The stored upstream model IDs
           content: { application/json: { schema: { $ref: "#/components/schemas/ProviderModels" } } }
+        "400": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: syncProviderModels
+      summary: Re-fetch the catalog from the provider itself (with a stored account's credential) and replace the stored rows
+      parameters:
+        - { name: provider, in: path, required: true, schema: { $ref: "#/components/schemas/Provider" } }
+      responses:
+        "200": { description: The fresh catalog, content: { application/json: { schema: { $ref: "#/components/schemas/ProviderModels" } } } }
         "400": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }

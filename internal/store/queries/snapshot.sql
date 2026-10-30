@@ -61,6 +61,9 @@ SELECT id, provider, base_url, credentials, state, cooldown_until, auth_kind, di
 FROM provider_accounts
 ORDER BY position;
 
+-- name: SnapshotProviderModels :many
+SELECT provider, model FROM provider_models;
+
 -- name: SnapshotStickyBindings :many
 SELECT user_id, provider, account_id
 FROM sticky_bindings;
