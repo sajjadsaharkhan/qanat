@@ -104,6 +104,7 @@ services:
     build: { context: ../../web }
     environment:
       QANAT_CONTROL_URL: http://control:8081
+      QANAT_GATEWAY_URL: http://gateway:8080
     ports: ["${QANAT_WEB_PORT:-3000}:3000"]
     depends_on:
       control: { condition: service_healthy }

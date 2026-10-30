@@ -88,18 +88,26 @@ func TestAllowed_Prefixed(t *testing.T) {
 	}
 }
 
-// /v1/models lists prefixed names for providers with accounts, by family.
+// /v1/models lists prefixed names from each provider's own catalog, never
+// guessed from the price table by family.
 func TestModelNames_Prefixed(t *testing.T) {
 	s := testSnapshot()
-	s.accounts = map[string][]*Account{"claude": {{ID: "a"}}, "codex": {{ID: "b"}}}
+	s.accounts = map[string][]*Account{"claude": {{ID: "a"}}, "codex": {{ID: "b"}}, "antigravity": {{ID: "c"}}}
 	s.prices["gpt-5.5"] = Price{}
+	s.providerModels = map[string][]string{
+		"claude":      {"claude-sonnet-4-6"},
+		"codex":       {"gpt-5.5"},
+		"antigravity": {"gemini-3-pro"},
+	}
 	got := s.ModelNames(&Plan{}, &Key{})
-	for _, want := range []string{"cc/claude-sonnet-4-6", "cx/gpt-5.5"} {
+	for _, want := range []string{"cc/claude-sonnet-4-6", "cx/gpt-5.5", "ag/gemini-3-pro"} {
 		if !slices.Contains(got, want) {
 			t.Errorf("missing %s in %v", want, got)
 		}
 	}
-	for _, not := range []string{"ag/claude-sonnet-4-6", "cc/gpt-5.5", "cx/claude-sonnet-4-6"} {
+	// claude-opus-4-7 is priced and Antigravity serves the claude- family,
+	// but no catalog lists it.
+	for _, not := range []string{"cc/claude-opus-4-7", "ag/claude-sonnet-4-6", "ag/claude-opus-4-7", "cc/gpt-5.5", "cx/claude-sonnet-4-6"} {
 		if slices.Contains(got, not) {
 			t.Errorf("unexpected %s", not)
 		}
@@ -115,9 +123,13 @@ func TestModelNames_UsableAccountsOnly(t *testing.T) {
 		"codex":       {{ID: "b", State: "disconnected"}},
 		"antigravity": {{ID: "c", Disabled: true}, {ID: "d", State: "healthy"}},
 	}
-	s.prices["gpt-5.5"] = Price{}
+	s.providerModels = map[string][]string{
+		"claude":      {"claude-sonnet-4-6"},
+		"codex":       {"gpt-5.5"},
+		"antigravity": {"claude-sonnet-4-6"},
+	}
 	got := s.ModelNames(&Plan{}, &Key{})
-	for _, not := range []string{"cc/claude-sonnet-4-6", "cc/claude-opus-4-7", "cx/gpt-5.5"} {
+	for _, not := range []string{"cc/claude-sonnet-4-6", "cx/gpt-5.5"} {
 		if slices.Contains(got, not) {
 			t.Errorf("disabled/disconnected provider advertised %s", not)
 		}

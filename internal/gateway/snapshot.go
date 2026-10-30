@@ -211,19 +211,12 @@ func (s *Snapshot) ModelNames(p *Plan, k *Key) []string {
 	for _, c := range s.combos {
 		add(c.Name)
 	}
-	for m := range s.prices {
-		// Prefixed names for each provider with a usable account that serves
-		// the model's family, as 9router lists "cc/…" and "cx/…" (REQ-MAP-04).
-		// Priced models are never advertised bare — bare names are reserved
-		// for what an admin configured in the mapping (exact rules below).
-		for _, pv := range provider.All {
-			if s.serves(pv.ID) && pv.Serves(m) {
-				add(pv.Prefix + "/" + m)
-			}
-		}
-	}
-	// Stored provider catalogs, prefixed: what the provider itself says it
-	// serves, when it has a usable account.
+	// Prefixed names come only from each provider's stored catalog — what
+	// the provider itself says it serves — and only while it has a usable
+	// account, as 9router lists "cc/…" and "cx/…" (REQ-MAP-04). The price
+	// table is never used to guess them: Antigravity serving the claude-
+	// family doesn't mean it has every Claude model. Bare names are reserved
+	// for what an admin configured in the mapping (exact rules above).
 	for _, pv := range provider.All {
 		if !s.serves(pv.ID) {
 			continue

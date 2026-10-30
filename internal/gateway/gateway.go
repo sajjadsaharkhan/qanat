@@ -173,6 +173,10 @@ func (g *Gateway) resolve(w http.ResponseWriter, r *http.Request, c *caller, end
 	if err != nil {
 		return fail(http.StatusBadRequest, "invalid_request_error", "Invalid request body: "+err.Error())
 	}
+	if base, ok := contextBase(name); ok {
+		body = protocol.ReplaceRange(body, s, e, base)
+		name, s, e, _ = protocol.ModelName(body)
+	}
 	if !Allowed(c.plan, c.key, name) {
 		rejections.WithLabelValues("model_not_allowed").Inc()
 		return fail(http.StatusForbidden, "permission_error",
@@ -201,6 +205,18 @@ func (g *Gateway) resolve(w http.ResponseWriter, r *http.Request, c *caller, end
 			fmt.Sprintf("The model %q has no confirmed price yet, so it can't be used. Ask an admin to confirm a price for %s.", name, quoteAll(unpriced)))
 	}
 	return rt, true
+}
+
+// contextBase drops Claude Code's 1M-context marker: "/model" writes
+// "ag/gemini-3.8-flash-high[1m]" for a model's 1M-context variant. The
+// suffix picks a context window, not a model, so routing, pricing and the
+// upstream all see the name without it.
+func contextBase(name string) (string, bool) {
+	const suffix = "[1m]"
+	if len(name) <= len(suffix) || !strings.EqualFold(name[len(name)-len(suffix):], suffix) {
+		return "", false
+	}
+	return name[:len(name)-len(suffix)], true
 }
 
 // windows returns the Plan's windows that apply to name, with top-ups added.
