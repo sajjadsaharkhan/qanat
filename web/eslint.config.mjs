@@ -6,7 +6,7 @@ const paletteClass =
   /\b(?:bg|text|border|ring|fill|stroke|from|to|via|outline|divide|shadow)-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\d{2,3}\b/;
 const physicalSpacing = /(?:^|\s)-?(?:ml|mr|pl|pr|left|right)-[\w[\]./-]+/;
 
-export default [
+const config = [
   ...nextVitals,
   ...nextTs,
   { ignores: [".next/**", "playwright-report/**", "test-results/**"] },
@@ -32,3 +32,5 @@ export default [
     },
   },
 ];
+
+export default config;

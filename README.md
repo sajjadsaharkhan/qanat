@@ -10,7 +10,15 @@ Connect Claude Code:
 
 ## Status
 
-Pre-implementation. This repository holds the product documents and the **testing infrastructure**, built first so every requirement has a gate before its code exists. P0 starts with `cmd/gateway`.
+P0 in progress. Working now: the control plane (Admin API, root admin sign-in, Plans, keys, audit log) and the dashboard. The gateway answers health checks only; streaming arrives in P0 milestone M2.
+
+## Run it locally
+
+```sh
+make local-up      # builds and starts everything; prints where the root password is
+```
+
+Open http://localhost:3000 and sign in as `root` with the password in `deploy/local/secrets/root_password` (generated on first run, never committed). The gateway listens on http://localhost:18080. Change ports with `QANAT_WEB_PORT` / `QANAT_GATEWAY_PORT`. `make local-down` stops it; `make local-reset` also deletes its data.
 
 ## Documents
 
@@ -32,11 +40,13 @@ make help             # everything else
 ## Repository map
 
 ```
-cmd/            loadgen, mockupstream, oidcmock (test tools); gateway, control come in P0
-internal/       testkit: sse, mockupstream, latency, golden, oidctest, itenv
+cmd/            gateway, control; test tools loadgen, mockupstream, oidcmock
+internal/       control (Admin API + openapi.yaml), core (quota windows, API keys),
+                store (migrations, sqlc queries), config, platform, testkit
+deploy/local/   compose stack for running Qanat on your machine
 test/           acceptance suite (Seam A), recorded upstream fixtures
 deploy/test/    compose test stack, Nginx SSE config, tools Dockerfile
-web/            dashboard test setup, design tokens (globals.css), shared lib
+web/            dashboard (Next.js, shadcn/ui); API types generated from openapi.yaml
 ```
 
 ## Rules for agents working here
@@ -45,3 +55,4 @@ web/            dashboard test setup, design tokens (globals.css), shared lib
 - Cite requirement IDs in test names and commit messages.
 - Never log prompt or response content, and never commit secrets (`make fixtures-check` scans fixtures).
 - UI changes follow design.md, using tokens only, and must be checked in both themes.
+- Admin API changes: edit `internal/control/openapi.yaml`, then `cd web && npm run api:generate`. SQL changes: `make sqlc`.

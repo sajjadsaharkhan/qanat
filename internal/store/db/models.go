@@ -188,4 +188,5 @@ type User struct {
 	PlanID      string
 	CreatedAt   time.Time
 	DisabledAt  *time.Time
+	Username    *string
 }

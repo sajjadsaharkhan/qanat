@@ -1,0 +1,302 @@
+openapi: 3.1.0
+info:
+  title: Qanat Admin API
+  version: 0.1.0
+  description: |
+    The control plane API behind the dashboard. Sessions are a first-party
+    HttpOnly cookie (`qanat_session`). Every request that changes state must
+    send the header `X-Qanat-Request: 1`.
+servers:
+  - url: /
+paths:
+  /api/auth/methods:
+    get:
+      operationId: authMethods
+      summary: Which sign-in methods are enabled
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/AuthMethods" } } } }
+  /api/auth/login:
+    post:
+      operationId: login
+      summary: Root admin password sign-in (D23)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/LoginRequest" } } }
+      responses:
+        "204": { description: Signed in; session cookie set }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /api/auth/logout:
+    post:
+      operationId: logout
+      responses:
+        "204": { description: Signed out }
+  /api/me:
+    get:
+      operationId: me
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Me" } } } }
+        "401": { $ref: "#/components/responses/Error" }
+  /api/me/quotas:
+    get:
+      operationId: myQuotas
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Quotas" } } } }
+        "401": { $ref: "#/components/responses/Error" }
+  /api/me/keys:
+    get:
+      operationId: listKeys
+      responses:
+        "200":
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Key" } } } }
+        "401": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createKey
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/CreateKeyRequest" } } }
+      responses:
+        "201": { description: Created; the full key is in this response only, content: { application/json: { schema: { $ref: "#/components/schemas/CreatedKey" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+  /api/me/keys/{id}:
+    delete:
+      operationId: revokeKey
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "204": { description: Revoked }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/me/setup:
+    get:
+      operationId: setup
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Setup" } } } }
+  /api/admin/users:
+    get:
+      operationId: listUsers
+      responses:
+        "200":
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/User" } } } }
+        "403": { $ref: "#/components/responses/Error" }
+  /api/admin/users/{id}:
+    patch:
+      operationId: updateUser
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/UpdateUserRequest" } } }
+      responses:
+        "204": { description: Updated }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/admin/plans:
+    get:
+      operationId: listPlans
+      responses:
+        "200":
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Plan" } } } }
+    post:
+      operationId: createPlan
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/PlanBody" } } }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Plan" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /api/admin/plans/{id}:
+    get:
+      operationId: getPlan
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Plan" } } } }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: updatePlan
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/PlanBody" } } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Plan" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deletePlan
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "204": { description: Deleted }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /api/admin/audit:
+    get:
+      operationId: listAudit
+      parameters:
+        - { name: before, in: query, schema: { type: integer, format: int64 }, description: Return entries older than this id }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        "200":
+          description: Newest first
+          content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/AuditEntry" } } } }
+components:
+  parameters:
+    Id: { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+  responses:
+    Error:
+      description: Error with a human-readable message
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+    AuthMethods:
+      type: object
+      required: [password, oidc]
+      properties:
+        password: { type: boolean }
+        oidc: { type: boolean }
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string }
+        password: { type: string }
+    Role: { type: string, enum: [user, admin] }
+    Me:
+      type: object
+      required: [id, email, name, username, role, plan_id, plan_name]
+      properties:
+        id: { type: string }
+        email: { type: string }
+        name: { type: string }
+        username: { type: [string, "null"] }
+        role: { $ref: "#/components/schemas/Role" }
+        plan_id: { type: string }
+        plan_name: { type: string }
+    WindowKind: { type: string, enum: [rolling_5h, daily, weekly, monthly] }
+    QuotaWindow:
+      type: object
+      required: [window, model_scope, limit_usd, used_usd, remaining_usd, resets_at]
+      properties:
+        window: { $ref: "#/components/schemas/WindowKind" }
+        model_scope: { type: [string, "null"] }
+        limit_usd: { type: number }
+        used_usd: { type: number }
+        remaining_usd: { type: number }
+        resets_at: { type: [string, "null"], format: date-time }
+    Quotas:
+      type: object
+      required: [timezone, windows]
+      properties:
+        timezone: { type: string }
+        windows: { type: array, items: { $ref: "#/components/schemas/QuotaWindow" } }
+    Key:
+      type: object
+      required: [id, name, prefix, expires_at, last_used_at, last_ip, revoked_at, created_at]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        prefix: { type: string }
+        expires_at: { type: [string, "null"], format: date-time }
+        last_used_at: { type: [string, "null"], format: date-time }
+        last_ip: { type: [string, "null"] }
+        revoked_at: { type: [string, "null"], format: date-time }
+        created_at: { type: string, format: date-time }
+    CreateKeyRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        expires_in_days: { type: [integer, "null"], minimum: 1, maximum: 3650 }
+    CreatedKey:
+      allOf:
+        - $ref: "#/components/schemas/Key"
+        - type: object
+          required: [key]
+          properties:
+            key: { type: string, description: The full key. Shown once. }
+    Setup:
+      type: object
+      required: [gateway_url]
+      properties:
+        gateway_url: { type: string }
+    User:
+      type: object
+      required: [id, email, name, username, role, plan_id, plan_name, active_keys, created_at, disabled_at]
+      properties:
+        id: { type: string }
+        email: { type: string }
+        name: { type: string }
+        username: { type: [string, "null"] }
+        role: { $ref: "#/components/schemas/Role" }
+        plan_id: { type: string }
+        plan_name: { type: string }
+        active_keys: { type: integer }
+        created_at: { type: string, format: date-time }
+        disabled_at: { type: [string, "null"], format: date-time }
+    UpdateUserRequest:
+      type: object
+      properties:
+        role: { $ref: "#/components/schemas/Role" }
+        plan_id: { type: string }
+    PlanQuota:
+      type: object
+      required: [window, model_scope, limit_usd]
+      properties:
+        window: { $ref: "#/components/schemas/WindowKind" }
+        model_scope: { type: [string, "null"] }
+        limit_usd: { type: number, minimum: 0 }
+    PlanLimits:
+      type: object
+      required: [rpm, max_concurrent]
+      properties:
+        rpm: { type: integer, minimum: 0, description: 0 = unlimited }
+        max_concurrent: { type: integer, minimum: 0, description: 0 = unlimited }
+    PlanBody:
+      type: object
+      required: [name, timezone, daily_anchor, weekly_anchor, monthly_anchor, quotas, limits, models]
+      properties:
+        name: { type: string }
+        timezone: { type: string, description: IANA zone, e.g. Asia/Tehran }
+        daily_anchor: { type: string, pattern: "^[0-2][0-9]:[0-5][0-9]$" }
+        weekly_anchor: { type: integer, minimum: 0, maximum: 6, description: 0 = Sunday, 6 = Saturday }
+        monthly_anchor: { type: integer, minimum: 1, maximum: 28 }
+        quotas: { type: array, items: { $ref: "#/components/schemas/PlanQuota" } }
+        limits: { $ref: "#/components/schemas/PlanLimits" }
+        models: { type: array, items: { type: string }, description: Allowed Qanat names; empty = all }
+    Plan:
+      allOf:
+        - $ref: "#/components/schemas/PlanBody"
+        - type: object
+          required: [id, is_default, user_count, updated_at]
+          properties:
+            id: { type: string }
+            is_default: { type: boolean }
+            user_count: { type: integer }
+            updated_at: { type: string, format: date-time }
+    AuditEntry:
+      type: object
+      required: [id, actor_id, actor_email, action, entity, entity_id, before, after, at]
+      properties:
+        id: { type: integer, format: int64 }
+        actor_id: { type: [string, "null"] }
+        actor_email: { type: string }
+        action: { type: string }
+        entity: { type: string }
+        entity_id: { type: [string, "null"] }
+        before: {}
+        after: {}
+        at: { type: string, format: date-time }

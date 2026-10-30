@@ -20,6 +20,16 @@ type Config struct {
 	// TestMode enables the test-only endpoints (QANAT_TEST_MODE=1). It is
 	// refused when any production-looking setting is present.
 	TestMode bool
+
+	// RootPassword enables the break-glass root admin login (D23):
+	// QANAT_ROOT_PASSWORD or QANAT_ROOT_PASSWORD_FILE. Empty disables it.
+	RootPassword string
+	// PublicGatewayURL is the ANTHROPIC_BASE_URL shown on the Setup page
+	// (QANAT_PUBLIC_GATEWAY_URL).
+	PublicGatewayURL string
+	// InsecureCookies drops the Secure cookie flag for plain-HTTP local runs
+	// (QANAT_INSECURE_COOKIES=1). Never set it behind TLS.
+	InsecureCookies bool
 }
 
 // Load reads the environment and validates it.
@@ -30,6 +40,13 @@ func Load() (Config, error) {
 		GatewayAddr: envOr("QANAT_GATEWAY_ADDR", ":8080"),
 		ControlAddr: envOr("QANAT_CONTROL_ADDR", ":8081"),
 		TestMode:    os.Getenv("QANAT_TEST_MODE") == "1",
+
+		RootPassword:     secret("QANAT_ROOT_PASSWORD"),
+		PublicGatewayURL: envOr("QANAT_PUBLIC_GATEWAY_URL", "http://localhost:8080"),
+		InsecureCookies:  os.Getenv("QANAT_INSECURE_COOKIES") == "1",
+	}
+	if c.RootPassword != "" && len(c.RootPassword) < 12 {
+		return c, fmt.Errorf("QANAT_ROOT_PASSWORD must be at least 12 characters")
 	}
 	if c.PostgresDSN == "" {
 		return c, fmt.Errorf("QANAT_POSTGRES_DSN is required")

@@ -7,7 +7,7 @@ INTEGRATION_ENV := QANAT_TEST_REDIS_ADDR=localhost:56379 \
 
 .PHONY: help test test-race test-reference test-integration test-acceptance bench \
         golden-update fixtures-check lint deps-up deps-down stack-up stack-down \
-        web-test web-e2e ci sqlc
+        web-test web-e2e ci sqlc local-up local-down local-logs local-reset
 
 help: ## List targets
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | awk -F':.*?## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -68,3 +68,27 @@ web-e2e: stack-up ## Dashboard Playwright tests, light + dark themes
 	cd web && npm run e2e
 
 ci: lint test test-race test-reference ## What CI runs without Docker
+
+# --- Local run (deploy/local) -------------------------------------------------
+LOCAL := docker compose -f deploy/local/compose.yml
+ROOT_PW := deploy/local/secrets/root_password
+
+$(ROOT_PW):
+	@mkdir -p $(dir $@) && umask 077 && openssl rand -base64 24 | tr -d '\n' > $@
+	@echo "Generated a root password in $@"
+
+local-up: $(ROOT_PW) ## Run Qanat locally: dashboard on http://localhost:3000
+	$(LOCAL) up -d --build --wait
+	@echo ""
+	@echo "  Dashboard  http://localhost:$${QANAT_WEB_PORT:-3000}"
+	@echo "  Sign in    username root, password in $(ROOT_PW)"
+	@echo ""
+
+local-down: ## Stop the local stack (keeps data)
+	$(LOCAL) down
+
+local-logs: ## Follow local stack logs
+	$(LOCAL) logs -f
+
+local-reset: ## Stop the local stack and delete its data
+	$(LOCAL) down -v

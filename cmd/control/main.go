@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"qanat/internal/config"
+	"qanat/internal/control"
 	"qanat/internal/platform"
 	"qanat/internal/store"
 )
@@ -41,7 +42,19 @@ func main() {
 	}
 	log.Info("schema up to date")
 
+	api := control.New(pg, rdb, log, control.Options{
+		RootPassword:  cfg.RootPassword,
+		GatewayURL:    cfg.PublicGatewayURL,
+		SecureCookies: !cfg.InsecureCookies,
+	})
+	if err := api.Bootstrap(ctx); err != nil {
+		log.Error("bootstrap", "err", err)
+		os.Exit(1)
+	}
+	log.Info("admin api ready", "root_login", cfg.RootPassword != "")
+
 	mux := http.NewServeMux()
+	api.Register(mux)
 	platform.Health(mux, func(ctx context.Context) error {
 		if err := pg.Ping(ctx); err != nil {
 			return err
