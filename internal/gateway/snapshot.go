@@ -13,8 +13,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"qanat/internal/core/provider"
 	"qanat/internal/core/quota"
 	"qanat/internal/core/secretbox"
+	"qanat/internal/proxy"
 	"qanat/internal/store/db"
 )
 
@@ -35,6 +37,7 @@ type Snapshot struct {
 	prices   map[string]Price
 	accounts map[string][]*Account // provider → accounts in registration order
 	sticky   map[string]string     // user|provider → account ID
+	proxyIDs map[string]bool       // proxies some account routes through
 }
 
 // Key is a personal API key (hash lookup only).
@@ -91,9 +94,21 @@ func (p Price) CostMicro(in, out, cr, cw int64) int64 {
 // Account is a pool account (REQ-POOL-01/02).
 type Account struct {
 	ID, Provider, BaseURL string
+	Origin                string // scheme://host of the upstream, for proxy health
 	Token                 string // decrypted access token; never logged
 	State                 string
-	CooldownUntil         time.Time
+	// AuthKind is how Token authenticates upstream: "token" sends
+	// Authorization: Bearer (e.g. a token from `claude setup-token`), "api_key"
+	// sends x-api-key. Only claude forwards today.
+	AuthKind      string
+	Disabled      bool // disabled by an admin; sits out until re-enabled
+	CooldownUntil time.Time
+	// Proxies are the outbound routes to try, in order (§8.2): one entry for
+	// a proxy, a sticky group or direct (a nil entry); a failover group's
+	// enabled members by priority. Empty when every candidate is disabled or
+	// unreadable: the account sits out rather than leave from another source
+	// IP (REQ-PROXY-01).
+	Proxies []*proxy.Spec
 }
 
 // Lookup resolves a presented key.
@@ -113,10 +128,34 @@ func (s *Snapshot) Lookup(presented string) (*Key, *User, *Plan, bool) {
 	return k, u, p, true
 }
 
-// Resolve maps an incoming model name through the global mapping (REQ-MAP-01…04):
-// exact rule, then globs by priority, then provider prefixes, then the
-// claude-* default.
+// Resolve maps an incoming model name through the global mapping (REQ-MAP-01…04).
+// A provider prefix comes first and pins the provider: "cc/x" goes to Claude
+// with the bare name x, after any mapping rule for x that targets Claude (so
+// "cc/opus" follows an "opus" alias). Unprefixed names take the exact rule,
+// then globs by priority, then the claude-* default.
 func (s *Snapshot) Resolve(name string) (Target, bool) {
+	if id, bare, ok := provider.Split(name); ok {
+		m := Member{Provider: id, Model: bare}
+		if t, ok := s.match(bare); ok {
+			for _, tm := range t.Members {
+				if tm.Provider == id && tm.Model != "" {
+					m.Model = tm.Model
+					break
+				}
+			}
+		}
+		return Target{Members: []Member{m}}, true
+	}
+	if t, ok := s.match(name); ok {
+		return t, true
+	}
+	if strings.HasPrefix(name, "claude-") {
+		return Target{Members: []Member{{Provider: "claude"}}}, true
+	}
+	return Target{}, false
+}
+
+func (s *Snapshot) match(name string) (Target, bool) {
 	if t, ok := s.exact[name]; ok {
 		return t, true
 	}
@@ -125,22 +164,17 @@ func (s *Snapshot) Resolve(name string) (Target, bool) {
 			return g.target, true
 		}
 	}
-	for prefix, provider := range providerPrefixes {
-		if rest, ok := strings.CutPrefix(name, prefix); ok && rest != "" {
-			return Target{Members: []Member{{Provider: provider, Model: rest}}}, true
-		}
-	}
-	if strings.HasPrefix(name, "claude-") {
-		return Target{Members: []Member{{Provider: "claude"}}}, true
-	}
 	return Target{}, false
 }
 
-var providerPrefixes = map[string]string{"cc/": "claude", "cx/": "codex", "ag/": "antigravity"}
-
 // Allowed reports whether a Plan and key allow a Qanat name (REQ-ACCESS-01).
+// A prefixed name is allowed when either it or its bare name is, so a Plan
+// that lists "sonnet" also admits "cc/sonnet".
 func Allowed(p *Plan, k *Key, name string) bool {
-	return (p.Models == nil || p.Models[name]) && (k.Allowed == nil || k.Allowed[name])
+	in := func(set map[string]bool) bool {
+		return set == nil || set[name] || set[provider.Bare(name)]
+	}
+	return in(p.Models) && in(k.Allowed)
 }
 
 // ModelNames lists the Qanat names a person may use, for /v1/models: exact
@@ -164,6 +198,13 @@ func (s *Snapshot) ModelNames(p *Plan, k *Key) []string {
 		if _, ok := s.Resolve(m); ok {
 			add(m)
 		}
+		// Prefixed names for each provider with an account that serves the
+		// model's family, as 9router lists "cc/…" and "cx/…" (REQ-MAP-04).
+		for _, pv := range provider.All {
+			if len(s.accounts[pv.ID]) > 0 && pv.Serves(m) {
+				add(pv.Prefix + "/" + m)
+			}
+		}
 	}
 	return out
 }
@@ -186,7 +227,7 @@ func build(ctx context.Context, q *db.Queries, box *secretbox.Box, log *slog.Log
 	s := &Snapshot{
 		LoadedAt: time.Now(), keys: map[[32]byte]*Key{}, users: map[string]*User{}, plans: map[string]*Plan{},
 		grants: map[string]int64{}, exact: map[string]Target{}, prices: map[string]Price{},
-		accounts: map[string][]*Account{}, sticky: map[string]string{},
+		accounts: map[string][]*Account{}, sticky: map[string]string{}, proxyIDs: map[string]bool{},
 	}
 	var err error
 	if s.Gen, err = q.SnapshotGeneration(ctx); err != nil {
@@ -319,12 +360,91 @@ func build(ctx context.Context, q *db.Queries, box *secretbox.Box, log *slog.Log
 		s.prices[p.UpstreamModel] = Price{Version: p.ID, In: p.PIn, Out: p.POut, CRead: p.PCacheRead, CWrite: p.PCacheWrite}
 	}
 
+	proxies, err := q.SnapshotProxies(ctx)
+	if err != nil {
+		return nil, err
+	}
+	specs := map[string]*proxy.Spec{} // usable proxies only
+	defaultID := ""
+	for _, p := range proxies {
+		if p.IsDefault {
+			defaultID = p.ID
+		}
+		if !p.Enabled {
+			continue
+		}
+		password, err := proxy.OpenPassword(box, p.ID, p.Password)
+		if err != nil {
+			log.Error("proxy password unreadable; its accounts sit out", "proxy", p.ID, "err", err)
+			continue
+		}
+		specs[p.ID] = &proxy.Spec{ID: p.ID, Type: p.Type, Host: p.Host, Port: int(p.Port), Username: deref(p.Username), Password: password}
+	}
+	groups, err := q.SnapshotProxyGroups(ctx)
+	if err != nil {
+		return nil, err
+	}
+	policy := map[string]string{}
+	members := map[string][]*proxy.Spec{} // group → usable members by priority
+	for _, m := range groups {
+		policy[m.ID] = m.Policy
+		if sp := specs[m.ProxyID]; sp != nil {
+			members[m.ID] = append(members[m.ID], sp)
+		}
+	}
+	providerSetting := map[string]proxySetting{}
+	pps, err := q.SnapshotProviderProxies(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range pps {
+		providerSetting[p.Provider] = proxySetting{deref(p.ProxyID), deref(p.ProxyGroupID), p.ProxyDirect}
+	}
+	defaultSetting := proxySetting{proxyID: defaultID, direct: defaultID == ""}
+
+	// routes resolves a setting to the proxies an account tries, in order.
+	routes := func(accountID string, ps proxySetting) []*proxy.Spec {
+		switch {
+		case ps.direct:
+			return []*proxy.Spec{nil}
+		case ps.proxyID != "":
+			if sp := specs[ps.proxyID]; sp != nil {
+				return []*proxy.Spec{sp}
+			}
+			return nil
+		}
+		ms := members[ps.groupID]
+		if len(ms) == 0 {
+			return nil
+		}
+		if policy[ps.groupID] == "sticky" {
+			return []*proxy.Spec{proxy.Pick(accountID, ms)}
+		}
+		return ms
+	}
+
 	accounts, err := q.SnapshotAccounts(ctx)
 	if err != nil {
 		return nil, err
 	}
 	for _, a := range accounts {
-		acct := &Account{ID: a.ID, Provider: a.Provider, BaseURL: deref(a.BaseUrl), State: a.State}
+		acct := &Account{ID: a.ID, Provider: a.Provider, BaseURL: deref(a.BaseUrl), State: a.State, AuthKind: a.AuthKind, Disabled: a.DisabledAt != nil}
+		acct.Origin = proxy.Origin(acct.baseURL())
+		// §8.2: the account's own setting, else its provider's, else the
+		// global default proxy, else direct.
+		ps := proxySetting{deref(a.ProxyID), deref(a.ProxyGroupID), a.ProxyDirect}
+		if ps == (proxySetting{}) {
+			var ok bool
+			if ps, ok = providerSetting[a.Provider]; !ok {
+				ps = defaultSetting
+			}
+		}
+		acct.Proxies = routes(a.ID, ps)
+		for _, sp := range acct.Proxies {
+			if sp != nil {
+				s.proxyIDs[sp.ID] = true
+			}
+		}
 		if a.CooldownUntil != nil {
 			acct.CooldownUntil = *a.CooldownUntil
 		}
@@ -346,6 +466,13 @@ func build(ctx context.Context, q *db.Queries, box *secretbox.Box, log *slog.Log
 		s.sticky[b.UserID+"|"+b.Provider] = b.AccountID
 	}
 	return s, nil
+}
+
+// proxySetting is one level of §8.2: a proxy, a group, or direct. All zero
+// means "inherit from the next level".
+type proxySetting struct {
+	proxyID, groupID string
+	direct           bool
 }
 
 // Credentials is the sealed JSON stored in provider_accounts.credentials.

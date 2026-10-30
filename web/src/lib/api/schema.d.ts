@@ -54,6 +54,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/oidc/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Start OIDC Authorization Code flow with PKCE */
+        get: operations["oidcLogin"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/oidc/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** OIDC authorization callback */
+        get: operations["oidcCallback"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/me": {
         parameters: {
             query?: never;
@@ -151,6 +185,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/me/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The caller's usage by day, model and key */
+        get: operations["myUsage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/usage/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The caller's usage Overview (9router layout) */
+        get: operations["myUsageOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/usage/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Everyone's usage Overview, or one person's with user_id */
+        get: operations["adminUsageOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Everyone's usage, plus each user's spend and quota state */
+        get: operations["adminUsage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/usage/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One user's usage report and quota windows */
+        get: operations["adminUserUsage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/users/{id}/usage": {
         parameters: {
             query?: never;
@@ -196,6 +315,173 @@ export interface paths {
         delete: operations["deleteAccount"];
         options?: never;
         head?: never;
+        /** Change an account's fields: label, base URL, auth kind, credential, expiry, disabled, proxy */
+        patch: operations["updateAccount"];
+        trace?: never;
+    };
+    "/api/admin/accounts/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** The Check button — probe a not-yet-stored credential against the provider's official endpoint */
+        post: operations["validateAccount"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/accounts/{id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Check the stored credential against the provider's official endpoint, through the account's proxy (REQ-PROXY-01) */
+        post: operations["testAccount"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/accounts/{id}/move": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Swap the account with its provider neighbor in pool order */
+        post: operations["moveAccount"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/proxies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listProxies"];
+        put?: never;
+        post: operations["createProxy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/proxies/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["updateProxy"];
+        post?: never;
+        delete: operations["deleteProxy"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/proxies/{id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Egress IP, and latency and TLS to each provider, through the proxy (REQ-PROXY-05) */
+        post: operations["testProxy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/proxy-groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listProxyGroups"];
+        put?: never;
+        /** A failover or sticky group of proxies (PRD §8.1) */
+        post: operations["createProxyGroup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/proxy-groups/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["updateProxyGroup"];
+        post?: never;
+        delete: operations["deleteProxyGroup"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/provider-proxies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Each provider's proxy setting (PRD §8.2, level 2) */
+        get: operations["listProviderProxies"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/provider-proxies/{provider}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["setProviderProxy"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
         patch?: never;
         trace?: never;
     };
@@ -209,6 +495,23 @@ export interface paths {
         get: operations["listMappings"];
         /** Replace the whole global mapping table */
         put: operations["replaceMappings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The fixed provider registry and its model-name prefixes (cc/, cx/, ag/) */
+        get: operations["listProviders"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -344,6 +647,168 @@ export interface components {
         };
         /** @enum {string} */
         WindowKind: "rolling_5h" | "daily" | "weekly" | "monthly";
+        UsageGroup: {
+            model: string;
+            provider: string;
+            /** Format: int64 */
+            requests: number;
+            /**
+             * Format: int64
+             * @description Input + cache read + cache write
+             */
+            prompt_tokens: number;
+            /**
+             * Format: int64
+             * @description Cache reads (a subset of prompt tokens)
+             */
+            cached_tokens: number;
+            /** Format: int64 */
+            completion_tokens: number;
+            cost: number;
+            /** Format: date-time */
+            last_used: string;
+            account_id?: string;
+            account_name?: string;
+            key_id?: string;
+            key_name?: string;
+            key_prefix?: string;
+            user_email?: string;
+            endpoint?: string;
+        };
+        ChartBucket: {
+            /** Format: date-time */
+            start: string;
+            /** Format: int64 */
+            tokens: number;
+            cost: number;
+            /** Format: int64 */
+            requests: number;
+        };
+        RecentUsage: {
+            /** Format: date-time */
+            timestamp: string;
+            model: string;
+            provider: string;
+            /** Format: int64 */
+            prompt_tokens: number;
+            /** Format: int64 */
+            completion_tokens: number;
+            /** Format: int64 */
+            cached_tokens: number;
+            /** @enum {string} */
+            status: "ok" | "error";
+        };
+        UsageOverview: {
+            period: string;
+            /** @enum {string} */
+            granularity: "hour" | "day";
+            /** Format: int64 */
+            total_requests: number;
+            /** Format: int64 */
+            total_prompt_tokens: number;
+            /** Format: int64 */
+            total_cached_tokens: number;
+            /** Format: int64 */
+            total_completion_tokens: number;
+            total_cost: number;
+            by_provider: components["schemas"]["UsageGroup"][];
+            by_model: components["schemas"]["UsageGroup"][];
+            by_account: components["schemas"]["UsageGroup"][];
+            by_api_key: components["schemas"]["UsageGroup"][];
+            by_endpoint: components["schemas"]["UsageGroup"][];
+            chart: components["schemas"]["ChartBucket"][];
+            recent_requests: components["schemas"]["RecentUsage"][];
+            /**
+             * Format: int64
+             * @description Requests streaming now
+             */
+            active_count: number;
+            last_provider: string;
+            /** @description Provider of an error in the last 10 seconds */
+            error_provider: string;
+            providers: string[];
+        };
+        UsageSums: {
+            /** Format: int64 */
+            input_tokens: number;
+            /** Format: int64 */
+            output_tokens: number;
+            /** Format: int64 */
+            cache_read_tokens: number;
+            /** Format: int64 */
+            cache_write_tokens: number;
+            cost_usd: number;
+            /** Format: int64 */
+            request_count: number;
+            /**
+             * Format: int64
+             * @description Streams cut mid-way (REQ-QUOTA-01)
+             */
+            aborted_count: number;
+        };
+        UsageReportTotals: components["schemas"]["UsageSums"] & {
+            /** @description Cache reads over input + cache read + cache write tokens */
+            cache_hit_rate: number | null;
+        };
+        ModelUsage: components["schemas"]["UsageSums"] & {
+            /** @description Upstream model */
+            model: string;
+            provider: components["schemas"]["Provider"];
+        };
+        UsageDay: {
+            /** Format: date */
+            date: string;
+            models: components["schemas"]["ModelUsage"][];
+        };
+        KeyUsage: {
+            key_id: string;
+            name: string;
+            user_email: string;
+            revoked: boolean;
+            /** Format: int64 */
+            tokens: number;
+            cost_usd: number;
+            /** Format: int64 */
+            request_count: number;
+        };
+        UsageReport: {
+            days: number;
+            /** Format: date */
+            since: string;
+            totals: components["schemas"]["UsageReportTotals"];
+            /** @description One entry per day */
+            series: components["schemas"]["UsageDay"][];
+            by_model: components["schemas"]["ModelUsage"][];
+            by_key: components["schemas"]["KeyUsage"][];
+        };
+        UserUsage: {
+            id: string;
+            email: string;
+            name: string;
+            username: string | null;
+            /** @enum {string} */
+            role: "user" | "admin";
+            plan_name: string;
+            disabled: boolean;
+            cost_usd: number;
+            /** Format: int64 */
+            request_count: number;
+            /** Format: int64 */
+            tokens: number;
+            /** Format: date */
+            last_active: string | null;
+            quotas: components["schemas"]["QuotaWindow"][];
+            /** @description Highest used/limit across quota windows; 1 = exhausted */
+            tightest: number | null;
+        };
+        AdminUsage: components["schemas"]["UsageReport"] & {
+            users: components["schemas"]["UserUsage"][];
+        };
+        AdminUserUsage: {
+            user: components["schemas"]["UserUsage"];
+            timezone: string;
+            report: components["schemas"]["UsageReport"];
+        };
         QuotaWindow: {
             window: components["schemas"]["WindowKind"];
             model_scope: string | null;
@@ -445,6 +910,35 @@ export interface components {
             cooldown_until: string | null;
             /** Format: date-time */
             created_at: string;
+            /**
+             * @description token: sent upstream as a bearer token (e.g. a token from `claude setup-token`); api_key: sent as x-api-key. Codex and Antigravity only accept api_key
+             * @enum {string}
+             */
+            auth_kind: "token" | "api_key";
+            /**
+             * Format: date-time
+             * @description The credential's own expiry
+             */
+            expires_at: string | null;
+            /**
+             * Format: date-time
+             * @description Set when an admin disabled the account; it takes no traffic
+             */
+            disabled_at: string | null;
+            /**
+             * Format: date-time
+             * @description When the Test button last ran
+             */
+            last_check_at: string | null;
+            /** @description Result of the latest Test; 429 counts as valid */
+            last_check_ok: boolean | null;
+            last_check_error: string | null;
+            /**
+             * Format: int64
+             * @description Pool order; the gateway tries accounts top-down
+             */
+            position: number;
+            proxy: components["schemas"]["AccountProxy"];
         };
         CreateAccountRequest: {
             provider: components["schemas"]["Provider"];
@@ -453,9 +947,171 @@ export interface components {
             base_url?: string | null;
             /** @description Sealed with the master key; never returned */
             access_token?: string | null;
+            /**
+             * @default token
+             * @enum {string}
+             */
+            auth_kind: "token" | "api_key";
+            /** Format: date-time */
+            expires_at?: string | null;
+            proxy?: components["schemas"]["AccountProxy"];
+        };
+        /** @description Partial update; absent fields are kept. access_token null keeps the stored credential, "" removes it, a value re-seals it. expires_at "" clears it. */
+        UpdateAccountRequest: {
+            label?: string;
+            base_url?: string | null;
+            /** @enum {string} */
+            auth_kind?: "token" | "api_key";
+            access_token?: string | null;
+            /** @description RFC 3339 date-time */
+            expires_at?: string | null;
+            disabled?: boolean;
+            proxy?: components["schemas"]["AccountProxy"];
+        };
+        MoveAccountRequest: {
+            /** @enum {string} */
+            direction: "up" | "down";
+        };
+        ValidateAccountRequest: {
+            provider: components["schemas"]["Provider"];
+            /**
+             * @default token
+             * @enum {string}
+             */
+            auth_kind: "token" | "api_key";
+            base_url?: string | null;
+            access_token: string;
+        };
+        AccountTestResult: {
+            /** @description The credential authenticated; 429 counts as valid */
+            ok: boolean;
+            /** @description Upstream HTTP status */
+            status: number;
+            /** Format: int64 */
+            latency_ms: number;
+            error?: string;
+        };
+        /** @description "inherit" (next level of PRD §8.2: provider, then global default, else direct), "direct", a proxy ID, or "group:" + a proxy group ID */
+        AccountProxy: string;
+        /** @enum {string} */
+        ProxyType: "http" | "https" | "socks5" | "socks5h";
+        Proxy: {
+            id: string;
+            label: string;
+            type: components["schemas"]["ProxyType"];
+            host: string;
+            port: number;
+            username: string | null;
+            has_password: boolean;
+            enabled: boolean;
+            /** @description Used by accounts and providers set to inherit */
+            is_default: boolean;
+            /**
+             * Format: int64
+             * @description Accounts assigned to this proxy directly
+             */
+            account_count: number;
+            /** Format: date-time */
+            created_at: string;
+            /** @description Gateways' latest periodic check per upstream origin (REQ-PROXY-03); empty when no account routes through it */
+            health: components["schemas"]["ProxyHealth"][];
+        };
+        ProxyHealth: {
+            proxy_id: string;
+            /** @description Upstream scheme://host, e.g. https://api.anthropic.com */
+            origin: string;
+            /** @description False after 2 failed checks in a row; unhealthy proxies carry no traffic */
+            healthy: boolean;
+            /** @description Result of the latest check alone */
+            ok: boolean;
+            /** Format: int64 */
+            latency_ms: number;
+            error?: string;
+            /** Format: date-time */
+            at: string;
+        };
+        /**
+         * @description failover: members in order, unhealthy ones skipped. sticky: each account always uses one member
+         * @enum {string}
+         */
+        ProxyGroupPolicy: "failover" | "sticky";
+        ProxyGroup: {
+            id: string;
+            label: string;
+            policy: components["schemas"]["ProxyGroupPolicy"];
+            /** @description Proxy IDs in failover order */
+            members: string[];
+            /**
+             * Format: int64
+             * @description Accounts assigned to this group directly
+             */
+            account_count: number;
+            /** Format: date-time */
+            created_at: string;
+        };
+        ProxyGroupRequest: {
+            label: string;
+            policy: components["schemas"]["ProxyGroupPolicy"];
+            members: string[];
+        };
+        ProviderProxy: {
+            provider: components["schemas"]["Provider"];
+            proxy: components["schemas"]["AccountProxy"];
+        };
+        ProxyRequest: {
+            /** @description Defaults to host:port */
+            label?: string;
+            type: components["schemas"]["ProxyType"];
+            host: string;
+            port: number;
+            username?: string | null;
+            /** @description Sealed; never returned. On update null keeps the stored one, "" removes it */
+            password?: string | null;
+            /** @description Defaults to true; null keeps the current value on update */
+            enabled?: boolean | null;
+            is_default?: boolean;
+        };
+        ProxyTestResult: {
+            /** @description Empty when the IP echo service couldn't be reached */
+            egress_ip: string;
+            egress_error?: string;
+            location?: components["schemas"]["ProxyLocation"];
+            proxy_reachable: boolean;
+            providers: components["schemas"]["ProxyProbe"][];
+        };
+        /** @description Approximate geo-IP location of the egress IP; absent when the lookup service doesn't report one */
+        ProxyLocation: {
+            city?: string;
+            region?: string;
+            /** @description ISO 3166-1 alpha-2, e.g. SE */
+            country?: string;
+            /** @description Network operator */
+            org?: string;
+            timezone?: string;
+        };
+        ProxyProbe: {
+            provider: components["schemas"]["Provider"];
+            host: string;
+            ok: boolean;
+            /**
+             * Format: int64
+             * @description Connect
+             */
+            latency_ms: number;
+            tls_version?: string;
+            status?: number;
+            error?: string;
+        };
+        ProviderInfo: {
+            id: components["schemas"]["Provider"];
+            /** @description Model-name prefix without the slash; cc/<model> routes <model> to this provider */
+            prefix: string;
+            name: string;
+            /** @description Model-name prefixes listed under this provider in /v1/models */
+            families: string[];
         };
         MappingRule: {
-            /** @description Exact name or glob (claude-*) */
+            /** @description Exact name or glob (claude-*). Never provider-prefixed: cc/<name> applies the rule for <name> on Claude */
             pattern: string;
             provider: components["schemas"]["Provider"];
             /** @description null keeps the incoming name */
@@ -539,6 +1195,12 @@ export interface components {
     };
     parameters: {
         Id: string;
+        /** @description Default today */
+        Period: "today" | "24h" | "7d" | "30d" | "60d" | "all";
+        /** @description IANA zone where "today" starts; default UTC */
+        Tz: string;
+        /** @description Range ending today (UTC) */
+        Days: 7 | 30 | 90;
     };
     requestBodies: never;
     headers: never;
@@ -602,6 +1264,47 @@ export interface operations {
         responses: {
             /** @description Signed out */
             204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    oidcLogin: {
+        parameters: {
+            query?: {
+                next?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Redirect to OIDC authorization endpoint */
+            302: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    oidcCallback: {
+        parameters: {
+            query: {
+                code: string;
+                state: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Redirect to dashboard or access denied */
+            302: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -759,6 +1462,135 @@ export interface operations {
             };
         };
     };
+    myUsage: {
+        parameters: {
+            query?: {
+                /** @description Range ending today (UTC) */
+                days?: components["parameters"]["Days"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageReport"];
+                };
+            };
+            400: components["responses"]["Error"];
+        };
+    };
+    myUsageOverview: {
+        parameters: {
+            query?: {
+                /** @description Default today */
+                period?: components["parameters"]["Period"];
+                /** @description IANA zone where "today" starts; default UTC */
+                tz?: components["parameters"]["Tz"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageOverview"];
+                };
+            };
+            400: components["responses"]["Error"];
+        };
+    };
+    adminUsageOverview: {
+        parameters: {
+            query?: {
+                /** @description Default today */
+                period?: components["parameters"]["Period"];
+                /** @description IANA zone where "today" starts; default UTC */
+                tz?: components["parameters"]["Tz"];
+                user_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageOverview"];
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    adminUsage: {
+        parameters: {
+            query?: {
+                /** @description Range ending today (UTC) */
+                days?: components["parameters"]["Days"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminUsage"];
+                };
+            };
+            400: components["responses"]["Error"];
+        };
+    };
+    adminUserUsage: {
+        parameters: {
+            query?: {
+                /** @description Range ending today (UTC) */
+                days?: components["parameters"]["Days"];
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminUserUsage"];
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
     userUsage: {
         parameters: {
             query?: never;
@@ -850,6 +1682,369 @@ export interface operations {
             404: components["responses"]["Error"];
         };
     };
+    updateAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateAccountRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    validateAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ValidateAccountRequest"];
+            };
+        };
+        responses: {
+            /** @description Result of the check; ok=false is still a 200 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountTestResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+        };
+    };
+    testAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Result of the check; ok=false is still a 200 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountTestResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    moveAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MoveAccountRequest"];
+            };
+        };
+        responses: {
+            /** @description Moved */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    listProxies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Proxy"][];
+                };
+            };
+        };
+    };
+    createProxy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProxyRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+        };
+    };
+    updateProxy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProxyRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    deleteProxy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    testProxy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProxyTestResult"];
+                };
+            };
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    listProxyGroups: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProxyGroup"][];
+                };
+            };
+        };
+    };
+    createProxyGroup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProxyGroupRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+        };
+    };
+    updateProxyGroup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProxyGroupRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    deleteProxyGroup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    listProviderProxies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderProxy"][];
+                };
+            };
+        };
+    };
+    setProviderProxy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: components["schemas"]["Provider"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateAccountRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
     listMappings: {
         parameters: {
             query?: never;
@@ -891,6 +2086,26 @@ export interface operations {
                 content?: never;
             };
             400: components["responses"]["Error"];
+        };
+    };
+    listProviders: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Providers in display order */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderInfo"][];
+                };
+            };
         };
     };
     listPrices: {

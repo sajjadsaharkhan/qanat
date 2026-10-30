@@ -25,9 +25,14 @@ export function QanatMark({
   /** false draws the whole mark in currentColor, e.g. on the deep brand panel. */
   water?: boolean;
 }) {
-  const label = title ?? `Qanat, ${state}`;
+  const isDecorative = title === "";
+  const label = isDecorative ? undefined : (title || `Qanat, ${state}`);
   return (
-    <svg viewBox="0 0 100 100" role="img" aria-label={label} className={cn("size-6 shrink-0", className)}>
+    <svg
+      viewBox="0 0 100 100"
+      {...(isDecorative ? { "aria-hidden": "true" } : { role: "img", "aria-label": label })}
+      className={cn("size-6 shrink-0", className)}
+    >
       <g fill="none" stroke="currentColor" strokeWidth={6} strokeLinecap="round">
         {shafts.map((x) => (
           <line key={x} x1={x} y1={14} x2={x} y2={y(x) - 4} />

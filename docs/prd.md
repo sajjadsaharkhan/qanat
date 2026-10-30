@@ -77,6 +77,7 @@ There are exactly **two roles**, stored in Qanat (not in Keycloak).
 - **REQ-USER-01:** A user logging in for the first time via Keycloak MUST be auto-provisioned (JIT) with role `user`.
 - **REQ-USER-02:** Only an existing admin MAY promote a user to `admin`. Every role change MUST be written to the audit log.
 - **REQ-USER-03:** The first admin MUST be set via the env var `BOOTSTRAP_ADMIN_EMAIL`.
+- **REQ-USER-04:** A break-glass `root` admin MAY sign in with a password, without Keycloak, when `QANAT_ROOT_PASSWORD` (or `QANAT_ROOT_PASSWORD_FILE`, at least 12 characters) is set. Unset disables it. Failed attempts MUST be throttled and logged (D23).
 
 ### 3.1 Plans
 
@@ -177,7 +178,10 @@ Keycloak ──OIDC──► control (Admin API + aggregation worker) ──► 
 - **REQ-MAP-01:** The model name sent by the client MUST be resolved through a single **global** mapping table to either `provider/model` or a Combo. Mapping MUST NOT be overridable per Plan.
 - **REQ-MAP-02:** Mapping rules MUST support exact names and glob patterns (e.g. `claude-haiku-*`). An exact match MUST take precedence over a pattern.
 - **REQ-MAP-03:** If a user does not set the model env vars, Claude Code sends real Claude names. The default mapping for `claude-*` MUST be the same model on the Claude account pool.
-- **REQ-MAP-04:** Provider-prefixed names MUST also be accepted: `cc/…` (Claude), `cx/…` (Codex), `ag/…` (Antigravity).
+- **REQ-MAP-04:** Provider-prefixed names MUST also be accepted: `cc/…` (Claude), `cx/…` (Codex), `ag/…` (Antigravity), following 9router's provider aliases. The prefixes are fixed, not configurable (D24).
+  - The prefix MUST be resolved first and pins the provider; mapping rules cannot override it.
+  - The prefix MUST be stripped before forwarding. The remaining name is resolved through the mapping rules that target that provider (so `cc/opus` follows an `opus` rule to Claude); if none applies, it is forwarded unchanged. Any name works after a prefix, subject to pricing (D13).
+  - Mapping rule patterns MUST NOT start with a provider prefix.
 
 ### 6.2 Combos (from 9router)
 
@@ -194,8 +198,8 @@ Keycloak ──OIDC──► control (Admin API + aggregation worker) ──► 
 
 ### 6.4 Model access
 
-- **REQ-ACCESS-01:** The Plan allowlist MUST be defined over Qanat names (aliases and Combos), not over upstream model names. Combo internals stay hidden from users.
-- **REQ-ACCESS-02:** `/v1/models` MUST return only allowed names. Disallowed requests MUST get `403 permission_error` (see REQ-ERR-03).
+- **REQ-ACCESS-01:** The Plan allowlist MUST be defined over Qanat names (aliases and Combos), not over upstream model names. Combo internals stay hidden from users. A prefixed name is allowed when either it or its bare name is allowed (`sonnet` admits `cc/sonnet`); the same holds for a key's model restriction.
+- **REQ-ACCESS-02:** `/v1/models` MUST return only allowed names. Disallowed requests MUST get `403 permission_error` (see REQ-ERR-03). It also lists `prefix/model` for each priced model, under each provider that has an account and serves that model family (`claude-*` → `cc/`, `ag/`; `gpt-*` → `cx/`; `gemini-*` → `ag/`).
 
 ### 6.5 Account pool and routing
 
@@ -353,7 +357,7 @@ Rate limits stay separate from quotas, so one user cannot lock the whole pool th
 | Rate limit | Requests per minute, concurrent streams | Immediate `429`, `retry-after` of a few seconds |
 | Rolling quota | USD in the last 5 hours | `429` with time until capacity frees up |
 | Periodic quota | USD daily, weekly, monthly | `429` with time until the period resets |
-| Per-model / per-Combo quota | USD for one model (e.g. "Opus max $5/day") | `429` for that model only; others stay open |
+| Per-model / per-Combo quota | USD for one model (e.g. "Opus max $5/day"); also binds its prefixed forms (`cc/opus`) | `429` for that model only; others stay open |
 
 ### 10.3 Resets
 
@@ -657,3 +661,5 @@ All decisions below are settled. Open questions: **none**.
 | D20 | Observability: `/metrics` only, consumed by existing Prometheus/Grafana. Alerting via existing Alertmanager with a sample rules file. No notification layer in Qanat. |
 | D21 | OAuth onboarding on the server: paste the redirect URL in the dashboard (primary), or upload a credential file (fallback). |
 | D22 | No token-saver features (RTK etc.). |
+| D23 | Break-glass `root` admin with password sign-in, independent of Keycloak (REQ-USER-04). |
+| D24 | Provider prefixes are fixed like 9router (`cc`, `cx`, `ag`), not admin-configurable. Prefix first, then mapping on the bare name within that provider (REQ-MAP-04). |

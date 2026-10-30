@@ -1,20 +1,24 @@
 package control
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
+	"qanat/internal/core/provider"
+	"qanat/internal/proxy"
 	"qanat/internal/store/db"
 )
-
-var providers = map[string]bool{"claude": true, "codex": true, "antigravity": true}
 
 // --- accounts (REQ-POOL-01) ----------------------------------------------------
 
@@ -27,6 +31,14 @@ type accountResponse struct {
 	State          string     `json:"state"`
 	CooldownUntil  *time.Time `json:"cooldown_until"`
 	CreatedAt      time.Time  `json:"created_at"`
+	AuthKind       string     `json:"auth_kind"`
+	ExpiresAt      *time.Time `json:"expires_at"`
+	DisabledAt     *time.Time `json:"disabled_at"`
+	LastCheckAt    *time.Time `json:"last_check_at"`
+	LastCheckOk    *bool      `json:"last_check_ok"`
+	LastCheckError *string    `json:"last_check_error"`
+	Position       int64      `json:"position"`
+	Proxy          string     `json:"proxy"` // "inherit", "direct", a proxy ID or "group:<id>" (§8.2)
 }
 
 func (s *Server) listAccounts(w http.ResponseWriter, r *http.Request, _ *db.GetUserRow) {
@@ -37,7 +49,18 @@ func (s *Server) listAccounts(w http.ResponseWriter, r *http.Request, _ *db.GetU
 	}
 	out := make([]accountResponse, 0, len(rows))
 	for _, a := range rows {
-		out = append(out, accountResponse{a.ID, a.Provider, a.Label, a.BaseUrl, a.HasCredentials, a.State, a.CooldownUntil, a.CreatedAt})
+		var checkOk *bool
+		if a.LastCheckOk.Valid {
+			v := a.LastCheckOk.Bool
+			checkOk = &v
+		}
+		out = append(out, accountResponse{
+			ID: a.ID, Provider: a.Provider, Label: a.Label, BaseURL: a.BaseUrl, HasCredentials: a.HasCredentials,
+			State: a.State, CooldownUntil: a.CooldownUntil, CreatedAt: a.CreatedAt,
+			AuthKind: a.AuthKind, ExpiresAt: a.ExpiresAt, DisabledAt: a.DisabledAt,
+			LastCheckAt: a.LastCheckAt, LastCheckOk: checkOk, LastCheckError: a.LastCheckError,
+			Position: a.Position.Int64, Proxy: proxyChoice{a.ProxyID, a.ProxyGroupID, a.ProxyDirect}.String(),
+		})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -47,8 +70,30 @@ type createAccountRequest struct {
 	Label    string  `json:"label"`
 	BaseURL  *string `json:"base_url"`
 	// AccessToken is sealed with the master key before storage and never
-	// returned. OAuth connect and refresh arrive in M5 (§6.6).
+	// returned. Onboarding stays on official credentials: an API key, or a
+	// token from the provider's own tooling such as `claude setup-token`.
 	AccessToken *string `json:"access_token"`
+	// AuthKind is "token" (default; sent as a bearer token) or "api_key"
+	// (sent as x-api-key). Codex and Antigravity only accept "api_key".
+	AuthKind  string     `json:"auth_kind"`
+	ExpiresAt *time.Time `json:"expires_at"` // optional; the credential's own expiry
+	// Proxy is "inherit" (default), "direct", a proxy ID or "group:<id>" (§8.2).
+	Proxy string `json:"proxy"`
+}
+
+// validAuthKind reports whether kind is accepted for provider, answering with
+// the API error when not.
+func validAuthKind(w http.ResponseWriter, providerID, kind string) bool {
+	if kind != "token" && kind != "api_key" {
+		fail(w, http.StatusBadRequest, "invalid_auth_kind", `Auth kind must be "token" or "api_key".`)
+		return false
+	}
+	if kind == "token" && providerID != "claude" {
+		fail(w, http.StatusBadRequest, "invalid_auth_kind",
+			`Codex and Antigravity accounts authenticate with an API key. A pasted OAuth-style token is only accepted for Claude, e.g. the token from "claude setup-token".`)
+		return false
+	}
+	return true
 }
 
 func newUUID() string {
@@ -65,7 +110,7 @@ func (s *Server) createAccount(w http.ResponseWriter, r *http.Request, actor *db
 		return
 	}
 	req.Label = strings.TrimSpace(req.Label)
-	if !providers[req.Provider] {
+	if !provider.Known(req.Provider) {
 		fail(w, http.StatusBadRequest, "invalid_provider", `Provider must be "claude", "codex" or "antigravity".`)
 		return
 	}
@@ -77,6 +122,16 @@ func (s *Server) createAccount(w http.ResponseWriter, r *http.Request, actor *db
 			fail(w, http.StatusBadRequest, "invalid_base_url", "The base URL must look like https://host[:port].")
 			return
 		}
+	}
+	pc, ok := s.parseProxyChoice(w, r, req.Proxy)
+	if !ok {
+		return
+	}
+	if req.AuthKind == "" {
+		req.AuthKind = "token"
+	}
+	if !validAuthKind(w, req.Provider, req.AuthKind) {
+		return
 	}
 	id := newUUID()
 	var sealed []byte
@@ -92,12 +147,12 @@ func (s *Server) createAccount(w http.ResponseWriter, r *http.Request, actor *db
 			return
 		}
 	}
-	if err := s.q.CreateAccount(r.Context(), db.CreateAccountParams{ID: id, Provider: req.Provider, Label: req.Label, BaseUrl: req.BaseURL, Credentials: sealed}); err != nil {
+	if err := s.q.CreateAccount(r.Context(), db.CreateAccountParams{ID: id, Provider: req.Provider, Label: req.Label, BaseUrl: req.BaseURL, Credentials: sealed, AuthKind: req.AuthKind, ExpiresAt: req.ExpiresAt, ProxyID: pc.proxyID, ProxyGroupID: pc.groupID, ProxyDirect: pc.direct}); err != nil {
 		s.internal(w, r, err)
 		return
 	}
 	s.audit(r.Context(), &actor.ID, "account.create", "account", id, nil,
-		map[string]any{"provider": req.Provider, "label": req.Label, "base_url": req.BaseURL, "has_credentials": sealed != nil})
+		map[string]any{"provider": req.Provider, "label": req.Label, "base_url": req.BaseURL, "auth_kind": req.AuthKind, "has_credentials": sealed != nil, "proxy": pc.String()})
 	writeJSON(w, http.StatusCreated, map[string]string{"id": id})
 }
 
@@ -113,6 +168,456 @@ func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request, actor *db
 	}
 	s.audit(r.Context(), &actor.ID, "account.delete", "account", r.PathValue("id"), nil, nil)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// updateAccount changes an account's fields; absent ones are kept. The
+// credential is write-only: null keeps it, "" removes it, a value re-seals it.
+type updateAccountRequest struct {
+	Label       *string `json:"label"`
+	BaseURL     *string `json:"base_url"` // null keeps, "" clears
+	AuthKind    *string `json:"auth_kind"`
+	AccessToken *string `json:"access_token"`
+	ExpiresAt   *string `json:"expires_at"` // RFC 3339; null keeps, "" clears
+	Disabled    *bool   `json:"disabled"`
+	Proxy       *string `json:"proxy"`
+}
+
+func (s *Server) updateAccount(w http.ResponseWriter, r *http.Request, actor *db.GetUserRow) {
+	var req updateAccountRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	cur, err := s.q.GetAccountAdmin(r.Context(), r.PathValue("id"))
+	if isBadUUID(err) || notFound(err) {
+		fail(w, http.StatusNotFound, "not_found", "That account doesn't exist.")
+		return
+	}
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+
+	label := cur.Label
+	if req.Label != nil {
+		if strings.TrimSpace(*req.Label) == "" {
+			fail(w, http.StatusBadRequest, "invalid_label", "The label can't be empty.")
+			return
+		}
+		label = strings.TrimSpace(*req.Label)
+	}
+	baseURL := cur.BaseUrl
+	if req.BaseURL != nil {
+		if *req.BaseURL == "" {
+			baseURL = nil
+		} else {
+			if u, err := url.Parse(*req.BaseURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+				fail(w, http.StatusBadRequest, "invalid_base_url", "The base URL must look like https://host[:port].")
+				return
+			}
+			baseURL = req.BaseURL
+		}
+	}
+	authKind := cur.AuthKind
+	if req.AuthKind != nil {
+		if !validAuthKind(w, cur.Provider, *req.AuthKind) {
+			return
+		}
+		authKind = *req.AuthKind
+	}
+	expires := cur.ExpiresAt
+	if req.ExpiresAt != nil {
+		if *req.ExpiresAt == "" {
+			expires = nil
+		} else {
+			t, err := time.Parse(time.RFC3339, *req.ExpiresAt)
+			if err != nil {
+				fail(w, http.StatusBadRequest, "invalid_expires_at", "Give the expiry as an ISO 8601 date-time, like 2027-01-31T00:00:00Z.")
+				return
+			}
+			expires = &t
+		}
+	}
+	credentials := cur.Credentials
+	credChanged := false
+	if req.AccessToken != nil {
+		switch {
+		case *req.AccessToken == "":
+			credentials = nil
+		case s.opts.Box == nil:
+			fail(w, http.StatusBadRequest, "no_master_key", "Credentials can't be stored until QANAT_MASTER_KEY is set on the server.")
+			return
+		default:
+			plain, _ := json.Marshal(map[string]string{"access_token": *req.AccessToken})
+			sealed, err := s.opts.Box.Seal(plain, []byte(cur.ID))
+			if err != nil {
+				s.internal(w, r, err)
+				return
+			}
+			credentials = sealed
+		}
+		credChanged = true
+	}
+	disabledAt := cur.DisabledAt
+	if req.Disabled != nil {
+		if *req.Disabled {
+			t := s.now()
+			disabledAt = &t
+		} else {
+			disabledAt = nil
+		}
+	}
+
+	if _, err := s.q.UpdateAccountCore(r.Context(), db.UpdateAccountCoreParams{ID: cur.ID, Label: label, BaseUrl: baseURL, AuthKind: authKind, ExpiresAt: expires, Credentials: credentials, DisabledAt: disabledAt}); err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	proxyNote := proxyChoice{cur.ProxyID, cur.ProxyGroupID, cur.ProxyDirect}.String()
+	if req.Proxy != nil {
+		pc, ok := s.parseProxyChoice(w, r, *req.Proxy)
+		if !ok {
+			return
+		}
+		if _, err := s.q.SetAccountProxy(r.Context(), db.SetAccountProxyParams{ID: cur.ID, ProxyID: pc.proxyID, ProxyGroupID: pc.groupID, ProxyDirect: pc.direct}); err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		proxyNote = pc.String()
+	}
+	s.audit(r.Context(), &actor.ID, "account.update", "account", cur.ID, nil,
+		map[string]any{"label": label, "auth_kind": authKind, "disabled": disabledAt != nil, "proxy": proxyNote, "credentials_changed": credChanged})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// moveAccount swaps an account with its provider neighbor, mirroring
+// 9router's connection priority arrows; the gateway tries accounts in this
+// order.
+type moveAccountRequest struct {
+	Direction string `json:"direction"` // "up" or "down"
+}
+
+func (s *Server) moveAccount(w http.ResponseWriter, r *http.Request, actor *db.GetUserRow) {
+	var req moveAccountRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	if req.Direction != "up" && req.Direction != "down" {
+		fail(w, http.StatusBadRequest, "invalid_direction", `Direction must be "up" or "down".`)
+		return
+	}
+	cur, err := s.q.GetAccountAdmin(r.Context(), r.PathValue("id"))
+	if isBadUUID(err) || notFound(err) {
+		fail(w, http.StatusNotFound, "not_found", "That account doesn't exist.")
+		return
+	}
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	rows, err := s.q.AccountPositions(r.Context(), cur.Provider)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	i := slices.IndexFunc(rows, func(row db.AccountPositionsRow) bool { return row.ID == cur.ID })
+	j := i - 1
+	if req.Direction == "down" {
+		j = i + 1
+	}
+	if i < 0 || j < 0 || j >= len(rows) {
+		fail(w, http.StatusConflict, "invalid_move", fmt.Sprintf("That account can't move %s; it's already at the %s of the list.", req.Direction, map[string]string{"up": "top", "down": "bottom"}[req.Direction]))
+		return
+	}
+	err = pgx.BeginFunc(r.Context(), s.pg, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(r.Context(), "SET CONSTRAINTS provider_accounts_position DEFERRED"); err != nil {
+			return err
+		}
+		q := s.q.WithTx(tx)
+		if _, err := q.SetAccountPosition(r.Context(), db.SetAccountPositionParams{ID: rows[j].ID, Position: rows[i].Position}); err != nil {
+			return err
+		}
+		_, err := q.SetAccountPosition(r.Context(), db.SetAccountPositionParams{ID: rows[i].ID, Position: rows[j].Position})
+		return err
+	})
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	s.audit(r.Context(), &actor.ID, "account.move", "account", cur.ID, nil, map[string]string{"direction": req.Direction})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- account test ---------------------------------------------------------------
+
+// testUpstreamBase is used when the account has no base_url override. Codex
+// and Antigravity don't forward yet (not-done G4/G5); the Test button still
+// validates their stored API key against the official endpoint.
+var testUpstreamBase = map[string]string{
+	"claude":      "https://api.anthropic.com",
+	"codex":       "https://api.openai.com",
+	"antigravity": "https://generativelanguage.googleapis.com",
+}
+
+type accountTestResponse struct {
+	OK        bool   `json:"ok"`
+	Status    int    `json:"status"`
+	LatencyMS int64  `json:"latency_ms"`
+	Error     string `json:"error,omitempty"`
+}
+
+// validateAccount is the Check button in the Add dialog: it probes a
+// credential against the provider's official endpoint without storing it.
+type validateAccountRequest struct {
+	Provider    string  `json:"provider"`
+	AuthKind    string  `json:"auth_kind"`
+	BaseURL     *string `json:"base_url"`
+	AccessToken string  `json:"access_token"`
+}
+
+func (s *Server) validateAccount(w http.ResponseWriter, r *http.Request, _ *db.GetUserRow) {
+	var req validateAccountRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	if !provider.Known(req.Provider) {
+		fail(w, http.StatusBadRequest, "invalid_provider", `Provider must be "claude", "codex" or "antigravity".`)
+		return
+	}
+	if req.AuthKind == "" {
+		req.AuthKind = "token"
+	}
+	if !validAuthKind(w, req.Provider, req.AuthKind) {
+		return
+	}
+	if req.AccessToken == "" {
+		fail(w, http.StatusBadRequest, "no_credentials", "Paste the credential to check first.")
+		return
+	}
+	base := deref(req.BaseURL)
+	if base == "" {
+		base = testUpstreamBase[req.Provider]
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	req2, err := upstreamProbe(ctx, req.Provider, req.AuthKind, req.AccessToken, base)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	start := s.now()
+	resp, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		writeJSON(w, http.StatusOK, accountTestResponse{OK: false, LatencyMS: time.Since(start).Milliseconds(), Error: cleanUpstreamError(err)})
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+	res := accountTestResponse{Status: resp.StatusCode, LatencyMS: time.Since(start).Milliseconds()}
+	res.OK = resp.StatusCode >= 200 && resp.StatusCode < 300 || resp.StatusCode == http.StatusTooManyRequests
+	if !res.OK {
+		res.Error = upstreamErrorMessage(resp.StatusCode, body)
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// upstreamProbe builds the official-endpoint request that decides whether a
+// credential is accepted. claude gets a minimal Messages call (it works for
+// API keys and tokens alike); codex and antigravity list their models.
+func upstreamProbe(ctx context.Context, providerID, authKind, token, base string) (*http.Request, error) {
+	switch providerID {
+	case "claude":
+		body := strings.NewReader(`{"model":"claude-3-5-haiku-latest","max_tokens":1,"messages":[{"role":"user","content":"ping"}]}`)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSuffix(base, "/")+"/v1/messages", body)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("anthropic-version", "2023-06-01")
+		if authKind == "api_key" {
+			req.Header.Set("X-Api-Key", token)
+		} else {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		return req, nil
+	case "codex":
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSuffix(base, "/")+"/v1/models", nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		return req, nil
+	default: // antigravity
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSuffix(base, "/")+"/v1beta/models", nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("X-Goog-Api-Key", token)
+		return req, nil
+	}
+}
+
+// testAccount checks the stored credential against its provider's official
+// endpoint, through the account's own proxy (REQ-PROXY-01), and records the
+// result on the account. A 429 counts as valid: the credential authenticated.
+func (s *Server) testAccount(w http.ResponseWriter, r *http.Request, actor *db.GetUserRow) {
+	a, err := s.q.GetAccountAdmin(r.Context(), r.PathValue("id"))
+	if isBadUUID(err) || notFound(err) {
+		fail(w, http.StatusNotFound, "not_found", "That account doesn't exist.")
+		return
+	}
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	if len(a.Credentials) == 0 {
+		fail(w, http.StatusBadRequest, "no_credentials", "This account has no credential to test. Add one first.")
+		return
+	}
+	if s.opts.Box == nil {
+		fail(w, http.StatusConflict, "credentials_unreadable", "QANAT_MASTER_KEY isn't set on the server, so stored credentials can't be read.")
+		return
+	}
+	plain, err := s.opts.Box.Open(a.Credentials, []byte(a.ID))
+	if err != nil {
+		fail(w, http.StatusConflict, "credentials_unreadable", "The stored credential can't be read with the current master key. Save the credential again.")
+		return
+	}
+	var creds struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.Unmarshal(plain, &creds); err != nil || creds.AccessToken == "" {
+		fail(w, http.StatusConflict, "credentials_unreadable", "The stored credential can't be read with the current master key. Save the credential again.")
+		return
+	}
+	if !validAuthKind(w, a.Provider, a.AuthKind) {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	base := deref(a.BaseUrl)
+	if base == "" {
+		base = testUpstreamBase[a.Provider]
+	}
+	probe, err := upstreamProbe(ctx, a.Provider, a.AuthKind, creds.AccessToken, base)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+
+	client := &http.Client{}
+	if spec := s.accountProxySpec(r.Context(), a); spec != nil {
+		client.Transport = proxy.NewTransport(spec)
+	}
+	start := s.now()
+	resp, err := client.Do(probe)
+	if err != nil {
+		res := accountTestResponse{OK: false, LatencyMS: time.Since(start).Milliseconds(), Error: cleanUpstreamError(err)}
+		s.recordCheck(r, actor, a.ID, res)
+		writeJSON(w, http.StatusOK, res)
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+	res := accountTestResponse{Status: resp.StatusCode, LatencyMS: time.Since(start).Milliseconds()}
+	res.OK = resp.StatusCode >= 200 && resp.StatusCode < 300 || resp.StatusCode == http.StatusTooManyRequests
+	if !res.OK {
+		res.Error = upstreamErrorMessage(resp.StatusCode, body)
+	}
+	s.recordCheck(r, actor, a.ID, res)
+	writeJSON(w, http.StatusOK, res)
+}
+
+// recordCheck persists the test result and writes the audit entry.
+func (s *Server) recordCheck(r *http.Request, actor *db.GetUserRow, accountID string, res accountTestResponse) {
+	errText := &res.Error
+	if res.Error == "" {
+		errText = nil
+	}
+	t := s.now()
+	if err := s.q.SetAccountCheckResult(r.Context(), db.SetAccountCheckResultParams{ID: accountID, LastCheckAt: &t, LastCheckOk: pgtype.Bool{Bool: res.OK, Valid: true}, LastCheckError: errText}); err != nil {
+		s.log.Warn("can't record account check", "account", accountID, "err", err)
+	}
+	s.audit(r.Context(), &actor.ID, "account.test", "account", accountID, nil,
+		map[string]any{"ok": res.OK, "status": res.Status, "latency_ms": res.LatencyMS, "error": res.Error})
+}
+
+// upstreamErrorMessage pulls the provider's own error message out of the
+// response body; the dashboard shows it verbatim.
+func upstreamErrorMessage(status int, body []byte) string {
+	var e struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &e) == nil && e.Error.Message != "" {
+		return fmt.Sprintf("%d: %s", status, e.Error.Message)
+	}
+	return fmt.Sprintf("%d: %s", status, http.StatusText(status))
+}
+
+func cleanUpstreamError(err error) string {
+	msg := err.Error()
+	if u, ok := err.(*url.Error); ok {
+		msg = u.Err.Error() // drop the URL, which is redundant here
+	}
+	if len(msg) > 300 {
+		msg = msg[:300]
+	}
+	return msg
+}
+
+// accountProxySpec resolves the account's §8.2 chain: its own setting, then
+// its provider's, then the global default. nil means direct.
+func (s *Server) accountProxySpec(ctx context.Context, a db.GetAccountAdminRow) *proxy.Spec {
+	c := proxyChoice{a.ProxyID, a.ProxyGroupID, a.ProxyDirect}
+	if c == (proxyChoice{}) {
+		rows, err := s.q.ListProviderProxies(ctx)
+		if err == nil {
+			for _, row := range rows {
+				if row.Provider == a.Provider {
+					c = proxyChoice{row.ProxyID, row.ProxyGroupID, row.ProxyDirect}
+					break
+				}
+			}
+		}
+	}
+	if c == (proxyChoice{}) {
+		if p, err := s.q.GetDefaultProxy(ctx); err == nil {
+			return s.proxySpec(ctx, p.ID, p.Type, p.Host, int(p.Port), p.Username, p.Password)
+		}
+		return nil
+	}
+	switch {
+	case c.direct:
+		return nil
+	case c.proxyID != nil:
+		if p, err := s.q.GetProxy(ctx, *c.proxyID); err == nil {
+			return s.proxySpec(ctx, p.ID, p.Type, p.Host, int(p.Port), p.Username, p.Password)
+		}
+	case c.groupID != nil:
+		members, err := s.q.ListProxyGroupMembers(ctx)
+		if err == nil {
+			for _, m := range members {
+				if m.GroupID != *c.groupID {
+					continue
+				}
+				if p, err := s.q.GetProxy(ctx, m.ProxyID); err == nil && p.Enabled {
+					return s.proxySpec(ctx, p.ID, p.Type, p.Host, int(p.Port), p.Username, p.Password)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (s *Server) proxySpec(ctx context.Context, id, typ, host string, port int, username *string, password []byte) *proxy.Spec {
+	spec := &proxy.Spec{ID: id, Type: typ, Host: host, Port: port, Username: deref(username)}
+	if password != nil {
+		if pw, err := proxy.OpenPassword(s.opts.Box, id, password); err == nil {
+			spec.Password = pw
+		}
+	}
+	return spec
 }
 
 // --- mapping (REQ-MAP-01/02) -----------------------------------------------------
@@ -155,7 +660,11 @@ func (s *Server) replaceMappings(w http.ResponseWriter, r *http.Request, actor *
 			return
 		}
 		seen[m.Pattern] = true
-		if !providers[m.Provider] {
+		if _, _, ok := provider.Split(m.Pattern); ok {
+			fail(w, http.StatusBadRequest, "invalid_mapping", fmt.Sprintf("Rule %q: provider prefixes (cc/, cx/, ag/) route on their own; write the rule for the bare name.", m.Pattern))
+			return
+		}
+		if !provider.Known(m.Provider) {
 			fail(w, http.StatusBadRequest, "invalid_mapping", fmt.Sprintf("Rule %q: provider must be claude, codex or antigravity.", m.Pattern))
 			return
 		}
@@ -183,6 +692,24 @@ func (s *Server) replaceMappings(w http.ResponseWriter, r *http.Request, actor *
 	}
 	s.audit(r.Context(), &actor.ID, "mapping.replace", "mapping", "", nil, rules)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- providers (REQ-MAP-04) -------------------------------------------------------
+
+type providerInfo struct {
+	ID       string   `json:"id"`
+	Prefix   string   `json:"prefix"`
+	Name     string   `json:"name"`
+	Families []string `json:"families"`
+}
+
+// listProviders returns the fixed provider registry and its model prefixes.
+func (s *Server) listProviders(w http.ResponseWriter, _ *http.Request, _ *db.GetUserRow) {
+	out := make([]providerInfo, 0, len(provider.All))
+	for _, p := range provider.All {
+		out = append(out, providerInfo{p.ID, p.Prefix, p.Name, p.Families})
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // --- prices (REQ-PRICE-01…03) ----------------------------------------------------

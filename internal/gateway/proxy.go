@@ -3,6 +3,7 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -15,6 +16,7 @@ import (
 	"qanat/internal/core/quota"
 	"qanat/internal/core/usage"
 	"qanat/internal/protocol"
+	"qanat/internal/proxy"
 )
 
 // defaultBaseURL per provider; an account's base_url overrides it.
@@ -49,10 +51,34 @@ type forwardOpts struct {
 	usage     bool           // record and charge usage (Messages only)
 }
 
+// baseURL is the account's upstream, or the provider's default.
+func (a *Account) baseURL() string {
+	if a.BaseURL != "" {
+		return a.BaseURL
+	}
+	return defaultBaseURL[a.Provider]
+}
+
+// routes are the account's proxies that may carry traffic now: unhealthy
+// ones are skipped (REQ-PROXY-03).
+func (g *Gateway) routes(a *Account) []*proxy.Spec {
+	ok := a.Proxies[:0:0]
+	for _, sp := range a.Proxies {
+		if g.health.Healthy(sp, a.Origin) {
+			ok = append(ok, sp)
+		}
+	}
+	return ok
+}
+
 // candidates orders a provider's accounts for this user: sticky account
 // first, then the rest in registration order; skips accounts that are
-// disconnected or cooling down (REQ-POOL-02/03).
+// disconnected, cooling down, or have no usable proxy (REQ-POOL-02/03,
+// REQ-PROXY-01/03).
 func (g *Gateway) candidates(s *Snapshot, userID, provider string) []*Account {
+	if old := g.retained.Load(); old != s.Gen && g.retained.CompareAndSwap(old, s.Gen) {
+		g.proxies.Retain(s.proxyIDs) // close transports of proxies no longer used
+	}
 	now := time.Now()
 	g.mu.Lock()
 	stickyID, ok := g.sticky[userID+"|"+provider]
@@ -61,7 +87,7 @@ func (g *Gateway) candidates(s *Snapshot, userID, provider string) []*Account {
 	}
 	var out []*Account
 	for _, a := range s.accounts[provider] {
-		if a.State == "disconnected" || a.CooldownUntil.After(now) || g.cooldown[a.ID].After(now) {
+		if a.Disabled || a.State == "disconnected" || a.CooldownUntil.After(now) || g.cooldown[a.ID].After(now) || len(g.routes(a)) == 0 {
 			continue
 		}
 		if a.ID == stickyID {
@@ -83,6 +109,8 @@ func (g *Gateway) coolDown(a *Account, resp *http.Response) {
 	g.cooldown[a.ID] = time.Now().Add(d)
 	g.mu.Unlock()
 }
+
+var errNoRoute = errors.New("no healthy proxy")
 
 func retryable(status int) bool {
 	return status == http.StatusTooManyRequests || status >= 500
@@ -110,14 +138,24 @@ func (g *Gateway) forward(w http.ResponseWriter, r *http.Request, rt *route, o f
 		for _, a := range g.candidates(rt.snap, rt.user.ID, m.Provider) {
 			tried++
 			attempt := time.Now()
-			resp, err := g.send(r, a, m.Provider, body)
-			if err != nil {
+			// A failover group's next member is tried before the next account
+			// (REQ-PROXY-03); nothing has reached the client yet.
+			var resp *http.Response
+			var sp *proxy.Spec
+			err := errNoRoute // health changed since candidates ran
+			for _, sp = range g.routes(a) {
+				if resp, err = g.send(r, a, sp, body); err == nil {
+					break
+				}
 				if r.Context().Err() != nil {
 					requestsTotal.WithLabelValues(endpoint, "499").Inc()
 					return // client went away before anything was sent
 				}
+				proxyErrors.WithLabelValues(proxyLabel(sp), "connect").Inc()
+				g.log.Warn("upstream unreachable", "account", a.ID, "proxy", proxyLabel(sp), "err", err)
+			}
+			if err != nil {
 				upstreamErrors.WithLabelValues(m.Provider, a.ID, "connect").Inc()
-				g.log.Warn("upstream unreachable; trying next account", "account", a.ID, "err", err)
 				continue
 			}
 			if retryable(resp.StatusCode) {
@@ -132,7 +170,7 @@ func (g *Gateway) forward(w http.ResponseWriter, r *http.Request, rt *route, o f
 				continue
 			}
 			g.bindSticky(rt, m.Provider, a.ID)
-			g.stream(w, r, rt, o, m, a, resp, attempt, endpoint)
+			g.stream(w, r, rt, o, m, a, sp, resp, attempt, endpoint)
 			return
 		}
 	}
@@ -169,14 +207,11 @@ func (g *Gateway) bindSticky(rt *route, provider, accountID string) {
 	}
 }
 
-// send issues the upstream request, tied to the client's context so a
-// disconnect cancels it immediately (REQ-PERF-03).
-func (g *Gateway) send(r *http.Request, a *Account, provider string, body []byte) (*http.Response, error) {
-	base := a.BaseURL
-	if base == "" {
-		base = defaultBaseURL[provider]
-	}
-	url := strings.TrimSuffix(base, "/") + r.URL.Path
+// send issues the upstream request through sp (§8.2; nil = direct), tied to
+// the client's context so a disconnect cancels it immediately
+// (REQ-PERF-03).
+func (g *Gateway) send(r *http.Request, a *Account, sp *proxy.Spec, body []byte) (*http.Response, error) {
+	url := strings.TrimSuffix(a.baseURL(), "/") + r.URL.Path
 	if r.URL.RawQuery != "" {
 		url += "?" + r.URL.RawQuery
 	}
@@ -189,11 +224,20 @@ func (g *Gateway) send(r *http.Request, a *Account, provider string, body []byte
 			req.Header[k] = v
 		}
 	}
-	if a.Token != "" {
+	// Auth by the account's kind (migration 0007): an API key uses Anthropic's
+	// x-api-key form, everything else (a stored base-URL token, or a token
+	// from `claude setup-token`) is a bearer token. anthropic-* headers pass
+	// through from the caller, so only fill the version in when absent.
+	if a.AuthKind == "api_key" {
+		req.Header.Set("X-Api-Key", a.Token)
+		if req.Header.Get("anthropic-version") == "" {
+			req.Header.Set("anthropic-version", "2023-06-01")
+		}
+	} else if a.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+a.Token)
 	}
 	req.ContentLength = int64(len(body))
-	return g.client.Do(req)
+	return g.proxies.Client(sp).Do(withConnectTrace(req, sp))
 }
 
 // errorEvent reports an upstream failure after the first byte (REQ-POOL-06).
@@ -201,10 +245,13 @@ const errorEvent = "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":
 
 // stream copies the upstream response to the client, flushing every read
 // (REQ-STREAM-01, REQ-PERF-01/02), and settles usage at the end.
-func (g *Gateway) stream(w http.ResponseWriter, r *http.Request, rt *route, o forwardOpts, m Member, a *Account, resp *http.Response, attempt time.Time, endpoint string) {
+func (g *Gateway) stream(w http.ResponseWriter, r *http.Request, rt *route, o forwardOpts, m Member, a *Account, sp *proxy.Spec, resp *http.Response, attempt time.Time, endpoint string) {
 	defer resp.Body.Close()
 	activeStreams.Inc()
 	defer activeStreams.Dec()
+	proxyStreams := proxyActiveStreams.WithLabelValues(proxyLabel(sp))
+	proxyStreams.Inc()
+	defer proxyStreams.Dec()
 
 	h := w.Header()
 	for k, v := range resp.Header {
@@ -278,6 +325,7 @@ func (g *Gateway) stream(w http.ResponseWriter, r *http.Request, rt *route, o fo
 			} else {
 				errMsg = "upstream connection lost"
 				upstreamErrors.WithLabelValues(m.Provider, a.ID, "mid_stream").Inc()
+				proxyErrors.WithLabelValues(proxyLabel(sp), "mid_stream").Inc()
 				if sse {
 					io.WriteString(w, errorEvent)
 					rc.Flush()

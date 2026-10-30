@@ -20,6 +20,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"qanat/internal/core/secretbox"
+	"qanat/internal/proxy"
 	"qanat/internal/store/db"
 )
 
@@ -42,6 +43,22 @@ type Options struct {
 	Worker *Worker
 	// TestMode mounts the test-only endpoints (QANAT_TEST_MODE=1).
 	TestMode bool
+
+	// OIDC authentication settings (PRD §13).
+	OIDCIssuer          string
+	OIDCInternalURL     string
+	OIDCClientID        string
+	OIDCClientSecret    string
+	BootstrapAdminEmail string
+	WebURL              string
+
+	// ProxyIPEchoURL answers with the caller's IP, and optionally its
+	// location; the proxy Test button reports both (REQ-PROXY-05). Empty
+	// skips that check.
+	ProxyIPEchoURL string
+	// ProxyProbeTargets overrides the provider hosts the Test button reaches
+	// (tests). nil uses proxy.ProviderHosts.
+	ProxyProbeTargets []proxy.Target
 }
 
 // Server is the Admin API.
@@ -51,6 +68,7 @@ type Server struct {
 	rdb  *redis.Client
 	log  *slog.Logger
 	opts Options
+	oidc *OIDCClient
 	now  func() time.Time
 }
 
@@ -59,7 +77,11 @@ func New(pg *pgxpool.Pool, rdb *redis.Client, log *slog.Logger, opts Options) *S
 	if opts.SessionTTL == 0 {
 		opts.SessionTTL = 12 * time.Hour
 	}
-	return &Server{pg: pg, q: db.New(pg), rdb: rdb, log: log, opts: opts, now: time.Now}
+	var oidcClient *OIDCClient
+	if opts.OIDCIssuer != "" {
+		oidcClient = newOIDCClient(opts.OIDCIssuer, opts.OIDCInternalURL, opts.OIDCClientID, opts.OIDCClientSecret)
+	}
+	return &Server{pg: pg, q: db.New(pg), rdb: rdb, log: log, opts: opts, oidc: oidcClient, now: time.Now}
 }
 
 // Bootstrap prepares state the API relies on: the root user when enabled.
@@ -81,6 +103,8 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/auth/methods", s.authMethods)
 	mux.Handle("POST /api/auth/login", s.csrf(http.HandlerFunc(s.login)))
 	mux.Handle("POST /api/auth/logout", s.csrf(http.HandlerFunc(s.logout)))
+	mux.HandleFunc("GET /api/auth/oidc/login", s.oidcLogin)
+	mux.HandleFunc("GET /api/auth/oidc/callback", s.oidcCallback)
 
 	user := func(h func(http.ResponseWriter, *http.Request, *db.GetUserRow)) http.Handler {
 		return s.csrf(s.authed(h, false))
@@ -107,12 +131,33 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.Handle("GET /api/admin/users/{id}/usage", admin(s.userUsage))
 	mux.Handle("GET /api/admin/accounts", admin(s.listAccounts))
 	mux.Handle("POST /api/admin/accounts", admin(s.createAccount))
+	mux.Handle("PATCH /api/admin/accounts/{id}", admin(s.updateAccount))
 	mux.Handle("DELETE /api/admin/accounts/{id}", admin(s.deleteAccount))
+	mux.Handle("POST /api/admin/accounts/{id}/test", admin(s.testAccount))
+	mux.Handle("POST /api/admin/accounts/{id}/move", admin(s.moveAccount))
+	mux.Handle("POST /api/admin/accounts/validate", admin(s.validateAccount))
+	mux.Handle("GET /api/admin/proxies", admin(s.listProxies))
+	mux.Handle("POST /api/admin/proxies", admin(s.createProxy))
+	mux.Handle("PUT /api/admin/proxies/{id}", admin(s.updateProxy))
+	mux.Handle("DELETE /api/admin/proxies/{id}", admin(s.deleteProxy))
+	mux.Handle("POST /api/admin/proxies/{id}/test", admin(s.testProxy))
+	mux.Handle("GET /api/admin/proxy-groups", admin(s.listProxyGroups))
+	mux.Handle("POST /api/admin/proxy-groups", admin(s.createProxyGroup))
+	mux.Handle("PUT /api/admin/proxy-groups/{id}", admin(s.updateProxyGroup))
+	mux.Handle("DELETE /api/admin/proxy-groups/{id}", admin(s.deleteProxyGroup))
+	mux.Handle("GET /api/admin/provider-proxies", admin(s.listProviderProxies))
+	mux.Handle("PUT /api/admin/provider-proxies/{provider}", admin(s.setProviderProxy))
 	mux.Handle("GET /api/admin/mappings", admin(s.listMappings))
 	mux.Handle("PUT /api/admin/mappings", admin(s.replaceMappings))
+	mux.Handle("GET /api/admin/providers", admin(s.listProviders))
 	mux.Handle("GET /api/admin/prices", admin(s.listPrices))
 	mux.Handle("POST /api/admin/prices", admin(s.setPrice))
 	mux.Handle("GET /api/me/requests", user(s.recentRequests))
+	mux.Handle("GET /api/me/usage", user(s.myUsage))
+	mux.Handle("GET /api/me/usage/overview", user(s.myUsageOverview))
+	mux.Handle("GET /api/admin/usage/overview", admin(s.adminUsageOverview))
+	mux.Handle("GET /api/admin/usage", admin(s.adminUsage))
+	mux.Handle("GET /api/admin/usage/{id}", admin(s.adminUserUsage))
 
 	if s.opts.TestMode {
 		s.registerTestMode(mux)

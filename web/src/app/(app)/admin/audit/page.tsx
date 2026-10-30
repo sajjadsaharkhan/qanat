@@ -77,10 +77,10 @@ export default function AuditPage() {
                   <TableHead>Details</TableHead>
                 </TableRow>
               </TableHeader>
-              <TableBody>
+              <TableBody data-volatile>
                 {rows.map((e) => (
                   <TableRow key={e.id}>
-                    <TableCell className="tabular-nums" data-volatile>
+                    <TableCell className="tabular-nums">
                       {timeFmt.format(new Date(e.at))}
                     </TableCell>
                     <TableCell>{e.actor_email || "System"}</TableCell>

@@ -32,6 +32,32 @@ paths:
       operationId: logout
       responses:
         "204": { description: Signed out }
+  /api/auth/oidc/login:
+    get:
+      operationId: oidcLogin
+      summary: Start OIDC Authorization Code flow with PKCE
+      parameters:
+        - name: next
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "302": { description: Redirect to OIDC authorization endpoint }
+  /api/auth/oidc/callback:
+    get:
+      operationId: oidcCallback
+      summary: OIDC authorization callback
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema: { type: string }
+        - name: state
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "302": { description: Redirect to dashboard or access denied }
   /api/me:
     get:
       operationId: me
@@ -81,6 +107,61 @@ paths:
         "200":
           description: OK
           content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/RecentRequest" } } } }
+  /api/me/usage:
+    get:
+      operationId: myUsage
+      summary: The caller's usage by day, model and key
+      parameters: [{ $ref: "#/components/parameters/Days" }]
+      responses:
+        "200":
+          description: OK
+          content: { application/json: { schema: { $ref: "#/components/schemas/UsageReport" } } }
+        "400": { $ref: "#/components/responses/Error" }
+  /api/me/usage/overview:
+    get:
+      operationId: myUsageOverview
+      summary: The caller's usage Overview (9router layout)
+      parameters: [{ $ref: "#/components/parameters/Period" }, { $ref: "#/components/parameters/Tz" }]
+      responses:
+        "200":
+          description: OK
+          content: { application/json: { schema: { $ref: "#/components/schemas/UsageOverview" } } }
+        "400": { $ref: "#/components/responses/Error" }
+  /api/admin/usage/overview:
+    get:
+      operationId: adminUsageOverview
+      summary: Everyone's usage Overview, or one person's with user_id
+      parameters:
+        - { $ref: "#/components/parameters/Period" }
+        - { $ref: "#/components/parameters/Tz" }
+        - { name: user_id, in: query, required: false, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: OK
+          content: { application/json: { schema: { $ref: "#/components/schemas/UsageOverview" } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/admin/usage:
+    get:
+      operationId: adminUsage
+      summary: Everyone's usage, plus each user's spend and quota state
+      parameters: [{ $ref: "#/components/parameters/Days" }]
+      responses:
+        "200":
+          description: OK
+          content: { application/json: { schema: { $ref: "#/components/schemas/AdminUsage" } } }
+        "400": { $ref: "#/components/responses/Error" }
+  /api/admin/usage/{id}:
+    get:
+      operationId: adminUserUsage
+      summary: One user's usage report and quota windows
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/Days" }]
+      responses:
+        "200":
+          description: OK
+          content: { application/json: { schema: { $ref: "#/components/schemas/AdminUserUsage" } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /api/admin/users/{id}/usage:
     get:
       operationId: userUsage
@@ -104,11 +185,156 @@ paths:
         "201": { description: Created, content: { application/json: { schema: { type: object, required: [id], properties: { id: { type: string } } } } } }
         "400": { $ref: "#/components/responses/Error" }
   /api/admin/accounts/{id}:
+    patch:
+      operationId: updateAccount
+      summary: "Change an account's fields: label, base URL, auth kind, credential, expiry, disabled, proxy"
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/UpdateAccountRequest" } } }
+      responses:
+        "204": { description: Updated }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
     delete:
       operationId: deleteAccount
       parameters: [{ $ref: "#/components/parameters/Id" }]
       responses:
         "204": { description: Deleted }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/admin/accounts/validate:
+    post:
+      operationId: validateAccount
+      summary: The Check button — probe a not-yet-stored credential against the provider's official endpoint
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ValidateAccountRequest" } } }
+      responses:
+        "200":
+          description: Result of the check; ok=false is still a 200
+          content: { application/json: { schema: { $ref: "#/components/schemas/AccountTestResult" } } }
+        "400": { $ref: "#/components/responses/Error" }
+  /api/admin/accounts/{id}/test:
+    post:
+      operationId: testAccount
+      summary: Check the stored credential against the provider's official endpoint, through the account's proxy (REQ-PROXY-01)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: Result of the check; ok=false is still a 200
+          content: { application/json: { schema: { $ref: "#/components/schemas/AccountTestResult" } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /api/admin/accounts/{id}/move:
+    post:
+      operationId: moveAccount
+      summary: Swap the account with its provider neighbor in pool order
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/MoveAccountRequest" } } }
+      responses:
+        "204": { description: Moved }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /api/admin/proxies:
+    get:
+      operationId: listProxies
+      responses:
+        "200":
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Proxy" } } } }
+    post:
+      operationId: createProxy
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ProxyRequest" } } }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { type: object, required: [id], properties: { id: { type: string } } } } } }
+        "400": { $ref: "#/components/responses/Error" }
+  /api/admin/proxies/{id}:
+    put:
+      operationId: updateProxy
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ProxyRequest" } } }
+      responses:
+        "204": { description: Updated }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteProxy
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "204": { description: Deleted }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /api/admin/proxies/{id}/test:
+    post:
+      operationId: testProxy
+      summary: Egress IP, and latency and TLS to each provider, through the proxy (REQ-PROXY-05)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: OK
+          content: { application/json: { schema: { $ref: "#/components/schemas/ProxyTestResult" } } }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /api/admin/proxy-groups:
+    get:
+      operationId: listProxyGroups
+      responses:
+        "200":
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/ProxyGroup" } } } }
+    post:
+      operationId: createProxyGroup
+      summary: A failover or sticky group of proxies (PRD §8.1)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ProxyGroupRequest" } } }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { type: object, required: [id], properties: { id: { type: string } } } } } }
+        "400": { $ref: "#/components/responses/Error" }
+  /api/admin/proxy-groups/{id}:
+    put:
+      operationId: updateProxyGroup
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ProxyGroupRequest" } } }
+      responses:
+        "204": { description: Updated }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteProxyGroup
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "204": { description: Deleted }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /api/admin/provider-proxies:
+    get:
+      operationId: listProviderProxies
+      summary: Each provider's proxy setting (PRD §8.2, level 2)
+      responses:
+        "200":
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/ProviderProxy" } } } }
+  /api/admin/provider-proxies/{provider}:
+    put:
+      operationId: setProviderProxy
+      parameters: [{ name: provider, in: path, required: true, schema: { $ref: "#/components/schemas/Provider" } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/UpdateAccountRequest" } } }
+      responses:
+        "204": { description: Updated }
+        "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
   /api/admin/mappings:
     get:
@@ -126,6 +352,14 @@ paths:
       responses:
         "204": { description: Replaced }
         "400": { $ref: "#/components/responses/Error" }
+  /api/admin/providers:
+    get:
+      operationId: listProviders
+      summary: The fixed provider registry and its model-name prefixes (cc/, cx/, ag/)
+      responses:
+        "200":
+          description: Providers in display order
+          content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/ProviderInfo" } } } }
   /api/admin/prices:
     get:
       operationId: listPrices
@@ -216,6 +450,9 @@ paths:
 components:
   parameters:
     Id: { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    Period: { name: period, in: query, required: false, description: Default today, schema: { type: string, enum: [today, 24h, 7d, 30d, 60d, all] } }
+    Tz: { name: tz, in: query, required: false, description: IANA zone where "today" starts; default UTC, schema: { type: string } }
+    Days: { name: days, in: query, required: false, description: Range ending today (UTC), default 30, schema: { type: integer, enum: [7, 30, 90] } }
   responses:
     Error:
       description: Error with a human-readable message
@@ -256,6 +493,151 @@ components:
         plan_id: { type: string }
         plan_name: { type: string }
     WindowKind: { type: string, enum: [rolling_5h, daily, weekly, monthly] }
+    UsageGroup:
+      type: object
+      required: [model, provider, requests, prompt_tokens, cached_tokens, completion_tokens, cost, last_used]
+      properties:
+        model: { type: string }
+        provider: { type: string }
+        requests: { type: integer, format: int64 }
+        prompt_tokens: { type: integer, format: int64, description: Input + cache read + cache write }
+        cached_tokens: { type: integer, format: int64, description: Cache reads (a subset of prompt tokens) }
+        completion_tokens: { type: integer, format: int64 }
+        cost: { type: number }
+        last_used: { type: string, format: date-time }
+        account_id: { type: string }
+        account_name: { type: string }
+        key_id: { type: string }
+        key_name: { type: string }
+        key_prefix: { type: string }
+        user_email: { type: string }
+        endpoint: { type: string }
+    ChartBucket:
+      type: object
+      required: [start, tokens, cost, requests]
+      properties:
+        start: { type: string, format: date-time }
+        tokens: { type: integer, format: int64 }
+        cost: { type: number }
+        requests: { type: integer, format: int64 }
+    RecentUsage:
+      type: object
+      required: [timestamp, model, provider, prompt_tokens, completion_tokens, cached_tokens, status]
+      properties:
+        timestamp: { type: string, format: date-time }
+        model: { type: string }
+        provider: { type: string }
+        prompt_tokens: { type: integer, format: int64 }
+        completion_tokens: { type: integer, format: int64 }
+        cached_tokens: { type: integer, format: int64 }
+        status: { type: string, enum: [ok, error] }
+    UsageOverview:
+      type: object
+      required: [period, granularity, total_requests, total_prompt_tokens, total_cached_tokens, total_completion_tokens, total_cost,
+                 by_provider, by_model, by_account, by_api_key, by_endpoint, chart, recent_requests, active_count, last_provider, error_provider, providers]
+      properties:
+        period: { type: string }
+        granularity: { type: string, enum: [hour, day] }
+        total_requests: { type: integer, format: int64 }
+        total_prompt_tokens: { type: integer, format: int64 }
+        total_cached_tokens: { type: integer, format: int64 }
+        total_completion_tokens: { type: integer, format: int64 }
+        total_cost: { type: number }
+        by_provider: { type: array, items: { $ref: "#/components/schemas/UsageGroup" } }
+        by_model: { type: array, items: { $ref: "#/components/schemas/UsageGroup" } }
+        by_account: { type: array, items: { $ref: "#/components/schemas/UsageGroup" } }
+        by_api_key: { type: array, items: { $ref: "#/components/schemas/UsageGroup" } }
+        by_endpoint: { type: array, items: { $ref: "#/components/schemas/UsageGroup" } }
+        chart: { type: array, items: { $ref: "#/components/schemas/ChartBucket" } }
+        recent_requests: { type: array, items: { $ref: "#/components/schemas/RecentUsage" } }
+        active_count: { type: integer, format: int64, description: Requests streaming now }
+        last_provider: { type: string }
+        error_provider: { type: string, description: Provider of an error in the last 10 seconds }
+        providers: { type: array, items: { type: string } }
+    UsageSums:
+      type: object
+      required: [input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, request_count, aborted_count]
+      properties:
+        input_tokens: { type: integer, format: int64 }
+        output_tokens: { type: integer, format: int64 }
+        cache_read_tokens: { type: integer, format: int64 }
+        cache_write_tokens: { type: integer, format: int64 }
+        cost_usd: { type: number }
+        request_count: { type: integer, format: int64 }
+        aborted_count: { type: integer, format: int64, description: Streams cut mid-way (REQ-QUOTA-01) }
+    UsageReportTotals:
+      allOf:
+        - $ref: "#/components/schemas/UsageSums"
+        - type: object
+          required: [cache_hit_rate]
+          properties:
+            cache_hit_rate: { type: [number, "null"], description: Cache reads over input + cache read + cache write tokens }
+    ModelUsage:
+      allOf:
+        - $ref: "#/components/schemas/UsageSums"
+        - type: object
+          required: [model, provider]
+          properties:
+            model: { type: string, description: Upstream model }
+            provider: { $ref: "#/components/schemas/Provider" }
+    UsageDay:
+      type: object
+      required: [date, models]
+      properties:
+        date: { type: string, format: date }
+        models: { type: array, items: { $ref: "#/components/schemas/ModelUsage" } }
+    KeyUsage:
+      type: object
+      required: [key_id, name, user_email, revoked, tokens, cost_usd, request_count]
+      properties:
+        key_id: { type: string }
+        name: { type: string }
+        user_email: { type: string }
+        revoked: { type: boolean }
+        tokens: { type: integer, format: int64 }
+        cost_usd: { type: number }
+        request_count: { type: integer, format: int64 }
+    UsageReport:
+      type: object
+      required: [days, since, totals, series, by_model, by_key]
+      properties:
+        days: { type: integer }
+        since: { type: string, format: date }
+        totals: { $ref: "#/components/schemas/UsageReportTotals" }
+        series: { type: array, items: { $ref: "#/components/schemas/UsageDay" }, description: One entry per day, zero-filled }
+        by_model: { type: array, items: { $ref: "#/components/schemas/ModelUsage" } }
+        by_key: { type: array, items: { $ref: "#/components/schemas/KeyUsage" } }
+    UserUsage:
+      type: object
+      required: [id, email, name, username, role, plan_name, disabled, cost_usd, request_count, tokens, last_active, quotas, tightest]
+      properties:
+        id: { type: string }
+        email: { type: string }
+        name: { type: string }
+        username: { type: [string, "null"] }
+        role: { type: string, enum: [user, admin] }
+        plan_name: { type: string }
+        disabled: { type: boolean }
+        cost_usd: { type: number }
+        request_count: { type: integer, format: int64 }
+        tokens: { type: integer, format: int64 }
+        last_active: { type: [string, "null"], format: date }
+        quotas: { type: array, items: { $ref: "#/components/schemas/QuotaWindow" } }
+        tightest: { type: [number, "null"], description: Highest used/limit across quota windows; 1 = exhausted }
+    AdminUsage:
+      allOf:
+        - $ref: "#/components/schemas/UsageReport"
+        - type: object
+          required: [users]
+          properties:
+            users: { type: array, items: { $ref: "#/components/schemas/UserUsage" } }
+    AdminUserUsage:
+      type: object
+      required: [user, timezone, report]
+      properties:
+        user: { $ref: "#/components/schemas/UserUsage" }
+        timezone: { type: string }
+        report: { $ref: "#/components/schemas/UsageReport" }
     QuotaWindow:
       type: object
       required: [window, model_scope, limit_usd, used_usd, remaining_usd, resets_at]
@@ -359,7 +741,7 @@ components:
     Provider: { type: string, enum: [claude, codex, antigravity] }
     Account:
       type: object
-      required: [id, provider, label, base_url, has_credentials, state, cooldown_until, created_at]
+      required: [id, provider, label, base_url, has_credentials, state, cooldown_until, created_at, auth_kind, expires_at, disabled_at, last_check_at, last_check_ok, last_check_error, position, proxy]
       properties:
         id: { type: string }
         provider: { $ref: "#/components/schemas/Provider" }
@@ -369,6 +751,17 @@ components:
         state: { type: string, enum: [healthy, cooldown, disconnected] }
         cooldown_until: { type: [string, "null"], format: date-time }
         created_at: { type: string, format: date-time }
+        auth_kind:
+          type: string
+          enum: [token, api_key]
+          description: "token: sent upstream as a bearer token (e.g. a token from `claude setup-token`); api_key: sent as x-api-key. Codex and Antigravity only accept api_key"
+        expires_at: { type: [string, "null"], format: date-time, description: The credential's own expiry, when known }
+        disabled_at: { type: [string, "null"], format: date-time, description: Set when an admin disabled the account; it takes no traffic }
+        last_check_at: { type: [string, "null"], format: date-time, description: When the Test button last ran }
+        last_check_ok: { type: [boolean, "null"], description: Result of the latest Test; 429 counts as valid }
+        last_check_error: { type: [string, "null"] }
+        position: { type: integer, format: int64, description: Pool order; the gateway tries accounts top-down }
+        proxy: { $ref: "#/components/schemas/AccountProxy" }
     CreateAccountRequest:
       type: object
       required: [provider]
@@ -377,11 +770,156 @@ components:
         label: { type: string }
         base_url: { type: [string, "null"], description: Overrides the provider endpoint }
         access_token: { type: [string, "null"], description: Sealed with the master key; never returned }
+        auth_kind:
+          type: string
+          enum: [token, api_key]
+          default: token
+        expires_at: { type: [string, "null"], format: date-time }
+        proxy: { $ref: "#/components/schemas/AccountProxy" }
+    UpdateAccountRequest:
+      type: object
+      description: Partial update; absent fields are kept. access_token null keeps the stored credential, "" removes it, a value re-seals it. expires_at "" clears it.
+      properties:
+        label: { type: string }
+        base_url: { type: [string, "null"] }
+        auth_kind: { type: string, enum: [token, api_key] }
+        access_token: { type: [string, "null"] }
+        expires_at: { type: [string, "null"], description: RFC 3339 date-time }
+        disabled: { type: boolean }
+        proxy: { $ref: "#/components/schemas/AccountProxy" }
+    MoveAccountRequest:
+      type: object
+      required: [direction]
+      properties:
+        direction: { type: string, enum: [up, down] }
+    ValidateAccountRequest:
+      type: object
+      required: [provider, access_token]
+      properties:
+        provider: { $ref: "#/components/schemas/Provider" }
+        auth_kind: { type: string, enum: [token, api_key], default: token }
+        base_url: { type: [string, "null"] }
+        access_token: { type: string }
+    AccountTestResult:
+      type: object
+      required: [ok, status, latency_ms]
+      properties:
+        ok: { type: boolean, description: The credential authenticated; 429 counts as valid }
+        status: { type: integer, description: Upstream HTTP status, 0 on connection error }
+        latency_ms: { type: integer, format: int64 }
+        error: { type: string }
+    AccountProxy:
+      type: string
+      description: '"inherit" (next level of PRD §8.2: provider, then global default, else direct), "direct", a proxy ID, or "group:" + a proxy group ID'
+    ProxyType: { type: string, enum: [http, https, socks5, socks5h] }
+    Proxy:
+      type: object
+      required: [id, label, type, host, port, username, has_password, enabled, is_default, account_count, created_at, health]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        type: { $ref: "#/components/schemas/ProxyType" }
+        host: { type: string }
+        port: { type: integer }
+        username: { type: [string, "null"] }
+        has_password: { type: boolean }
+        enabled: { type: boolean }
+        is_default: { type: boolean, description: Used by accounts and providers set to inherit }
+        account_count: { type: integer, format: int64, description: Accounts assigned to this proxy directly }
+        created_at: { type: string, format: date-time }
+        health: { type: array, items: { $ref: "#/components/schemas/ProxyHealth" }, description: "Gateways' latest periodic check per upstream origin (REQ-PROXY-03); empty when no account routes through it" }
+    ProxyHealth:
+      type: object
+      required: [proxy_id, origin, healthy, ok, latency_ms, at]
+      properties:
+        proxy_id: { type: string }
+        origin: { type: string, description: "Upstream scheme://host, e.g. https://api.anthropic.com" }
+        healthy: { type: boolean, description: False after 2 failed checks in a row; unhealthy proxies carry no traffic }
+        ok: { type: boolean, description: Result of the latest check alone }
+        latency_ms: { type: integer, format: int64 }
+        error: { type: string }
+        at: { type: string, format: date-time }
+    ProxyGroupPolicy:
+      type: string
+      enum: [failover, sticky]
+      description: "failover: members in order, unhealthy ones skipped. sticky: each account always uses one member"
+    ProxyGroup:
+      type: object
+      required: [id, label, policy, members, account_count, created_at]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        policy: { $ref: "#/components/schemas/ProxyGroupPolicy" }
+        members: { type: array, items: { type: string }, description: Proxy IDs in failover order }
+        account_count: { type: integer, format: int64, description: Accounts assigned to this group directly }
+        created_at: { type: string, format: date-time }
+    ProxyGroupRequest:
+      type: object
+      required: [label, policy, members]
+      properties:
+        label: { type: string }
+        policy: { $ref: "#/components/schemas/ProxyGroupPolicy" }
+        members: { type: array, items: { type: string }, minItems: 1 }
+    ProviderProxy:
+      type: object
+      required: [provider, proxy]
+      properties:
+        provider: { $ref: "#/components/schemas/Provider" }
+        proxy: { $ref: "#/components/schemas/AccountProxy" }
+    ProxyRequest:
+      type: object
+      required: [type, host, port]
+      properties:
+        label: { type: string, description: Defaults to host:port }
+        type: { $ref: "#/components/schemas/ProxyType" }
+        host: { type: string }
+        port: { type: integer }
+        username: { type: [string, "null"] }
+        password: { type: [string, "null"], description: 'Sealed; never returned. On update null keeps the stored one, "" removes it' }
+        enabled: { type: [boolean, "null"], description: Defaults to true; null keeps the current value on update }
+        is_default: { type: boolean }
+    ProxyTestResult:
+      type: object
+      required: [egress_ip, providers, proxy_reachable]
+      properties:
+        egress_ip: { type: string, description: Empty when the IP echo service couldn't be reached }
+        egress_error: { type: string }
+        location: { $ref: "#/components/schemas/ProxyLocation" }
+        proxy_reachable: { type: boolean }
+        providers: { type: array, items: { $ref: "#/components/schemas/ProxyProbe" } }
+    ProxyLocation:
+      type: object
+      description: Approximate geo-IP location of the egress IP; absent when the lookup service doesn't report one
+      properties:
+        city: { type: string }
+        region: { type: string }
+        country: { type: string, description: "ISO 3166-1 alpha-2, e.g. SE" }
+        org: { type: string, description: Network operator, e.g. AS215960 Example GmbH }
+        timezone: { type: string }
+    ProxyProbe:
+      type: object
+      required: [provider, host, ok, latency_ms]
+      properties:
+        provider: { $ref: "#/components/schemas/Provider" }
+        host: { type: string }
+        ok: { type: boolean }
+        latency_ms: { type: integer, format: int64, description: Connect, TLS and first response, through the proxy }
+        tls_version: { type: string }
+        status: { type: integer }
+        error: { type: string }
+    ProviderInfo:
+      type: object
+      required: [id, prefix, name, families]
+      properties:
+        id: { $ref: "#/components/schemas/Provider" }
+        prefix: { type: string, description: "Model-name prefix without the slash; cc/<model> routes <model> to this provider" }
+        name: { type: string }
+        families: { type: array, items: { type: string }, description: Model-name prefixes listed under this provider in /v1/models }
     MappingRule:
       type: object
       required: [pattern, provider, upstream_model, priority]
       properties:
-        pattern: { type: string, description: Exact name or glob (claude-*) }
+        pattern: { type: string, description: "Exact name or glob (claude-*). Never provider-prefixed: cc/<name> applies the rule for <name> on Claude" }
         provider: { $ref: "#/components/schemas/Provider" }
         upstream_model: { type: [string, "null"], description: null keeps the incoming name }
         priority: { type: integer, description: Lower first, among globs }

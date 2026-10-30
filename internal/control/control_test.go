@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -14,9 +15,11 @@ import (
 
 	"qanat/internal/core/apikey"
 	"qanat/internal/core/quota"
+	"qanat/internal/core/secretbox"
 	"qanat/internal/platform"
 	"qanat/internal/store/storetest"
 	"qanat/internal/testkit/itenv"
+	"qanat/internal/testkit/oidctest"
 )
 
 const rootPW = "correct horse battery staple"
@@ -287,5 +290,255 @@ func TestAdmin_RegularUserIsForbidden(t *testing.T) {
 	}
 	if st := h.do(root, "PATCH", "/api/admin/users/"+id, `{"role":"admin"}`, nil); st != 204 {
 		t.Fatalf("promote: %d", st)
+	}
+}
+
+func TestOIDCLogin_Flow(t *testing.T) {
+	pg := storetest.DB(t)
+	rdb := platform.Redis(itenv.Redis(t))
+	t.Cleanup(func() { rdb.Close() })
+
+	idp := oidctest.New(t)
+
+	var srv *httptest.Server
+	s := New(pg, rdb, slog.New(slog.NewTextHandler(io.Discard, nil)), Options{
+		OIDCIssuer:          idp.IssuerURL(),
+		OIDCClientID:        idp.ClientID,
+		BootstrapAdminEmail: "bootstrap-admin@example.com",
+		GatewayURL:          "http://gw.test",
+	})
+	mux := http.NewServeMux()
+	s.Register(mux)
+	srv = httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	s.opts.WebURL = srv.URL
+
+	jar, _ := cookiejar.New(nil)
+	client := &http.Client{
+		Jar: jar,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if strings.HasSuffix(req.URL.Path, "/access-denied") || req.URL.Path == "/" {
+				return http.ErrUseLastResponse
+			}
+			return nil
+		},
+		Timeout: 5 * time.Second,
+	}
+
+	// 1. User outside qanat-users is rejected (REQ-AUTH-02)
+	idp.LoginAs(oidctest.Claims{
+		Subject: "outsider-1",
+		Email:   "outsider@example.com",
+		Name:    "Outsider",
+		Groups:  []string{"other-team"},
+	})
+	resp, err := client.Get(srv.URL + "/api/auth/oidc/login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "/access-denied" {
+		t.Fatalf("outsider redirect: status=%d, location=%q", resp.StatusCode, resp.Header.Get("Location"))
+	}
+
+	// 2. Regular user in qanat-users is JIT-provisioned as "user" (REQ-AUTH-03)
+	jar, _ = cookiejar.New(nil)
+	client.Jar = jar
+	idp.LoginAs(oidctest.Claims{
+		Subject: "dev-sub-1",
+		Email:   "dev@example.com",
+		Name:    "Dev User",
+		Groups:  []string{"qanat-users"},
+	})
+	resp, err = client.Get(srv.URL + "/api/auth/oidc/login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "/" {
+		t.Fatalf("dev redirect: status=%d, location=%q", resp.StatusCode, resp.Header.Get("Location"))
+	}
+
+	// Session is set and /api/me works
+	req, _ := http.NewRequest("GET", srv.URL+"/api/me", nil)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var me meResponse
+	json.NewDecoder(resp.Body).Decode(&me)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("/api/me status=%d", resp.StatusCode)
+	}
+	if me.Email != "dev@example.com" || me.Role != "user" {
+		t.Fatalf("dev /api/me: %+v", me)
+	}
+
+	// 3. User matching BootstrapAdminEmail is JIT-provisioned as "admin"
+	jar, _ = cookiejar.New(nil)
+	client.Jar = jar
+	idp.LoginAs(oidctest.Claims{
+		Subject: "admin-sub-1",
+		Email:   "bootstrap-admin@example.com",
+		Name:    "Bootstrap Admin",
+		Groups:  []string{"qanat-users"},
+	})
+	resp, err = client.Get(srv.URL + "/api/auth/oidc/login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "/" {
+		t.Fatalf("admin redirect: status=%d, location=%q", resp.StatusCode, resp.Header.Get("Location"))
+	}
+
+	req, _ = http.NewRequest("GET", srv.URL+"/api/me", nil)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	json.NewDecoder(resp.Body).Decode(&me)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("/api/me status=%d", resp.StatusCode)
+	}
+	if me.Email != "bootstrap-admin@example.com" || me.Role != "admin" {
+		t.Fatalf("admin /api/me: %+v", me)
+	}
+}
+
+// REQ-MAP-04: the provider registry is listed; mapping rules for prefixed
+// names are refused because the prefix routes on its own.
+func TestMappings_ProvidersAndPrefixedPatterns(t *testing.T) {
+	h := newHarness(t)
+	c := h.signInRoot()
+
+	var ps []providerInfo
+	if st := h.do(c, "GET", "/api/admin/providers", "", &ps); st != 200 || len(ps) != 3 || ps[0].Prefix != "cc" || ps[1].Prefix != "cx" || ps[2].Prefix != "ag" {
+		t.Fatalf("providers: %d %+v", st, ps)
+	}
+	if st := h.do(c, "PUT", "/api/admin/mappings", `[{"pattern":"cc/opus","provider":"claude","upstream_model":"claude-opus-4-7","priority":0}]`, nil); st != 400 {
+		t.Fatalf("prefixed pattern: %d", st)
+	}
+	if st := h.do(c, "PUT", "/api/admin/mappings", `[{"pattern":"opus","provider":"claude","upstream_model":"claude-opus-4-7","priority":0}]`, nil); st != 204 {
+		t.Fatalf("bare alias: %d", st)
+	}
+	var rules []mappingRule
+	if h.do(c, "GET", "/api/admin/mappings", "", &rules); len(rules) != 1 || rules[0].Pattern != "opus" {
+		t.Fatalf("rules: %+v", rules)
+	}
+}
+
+// The account section (not-done G1 rewrite): credential kinds with sealing, a
+// partial PATCH, the Test button against a stub upstream, and pool reordering.
+func TestAccounts_KindsPatchTestMove(t *testing.T) {
+	h := newHarness(t)
+	box, err := secretbox.New(base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.s.opts.Box = box
+	c := h.signInRoot()
+
+	// Codex and Antigravity take API keys only; a pasted token is Claude-only.
+	if st := h.do(c, "POST", "/api/admin/accounts", `{"provider":"codex","label":"cx","auth_kind":"token","access_token":"t"}`, nil); st != 400 {
+		t.Fatalf("codex token kind: %d", st)
+	}
+	var keyAcct, tokAcct struct {
+		ID string `json:"id"`
+	}
+	if st := h.do(c, "POST", "/api/admin/accounts", `{"provider":"codex","label":"cx key","auth_kind":"api_key","access_token":"sk-cx","proxy":"direct"}`, &keyAcct); st != 201 {
+		t.Fatalf("codex api_key: %d", st)
+	}
+	if st := h.do(c, "POST", "/api/admin/accounts", `{"provider":"claude","label":"cc token","access_token":"tok-1","expires_at":"2027-06-01T00:00:00Z","proxy":"direct"}`, &tokAcct); st != 201 {
+		t.Fatalf("claude token default kind: %d", st)
+	}
+
+	var accounts []accountResponse
+	if st := h.do(c, "GET", "/api/admin/accounts", "", &accounts); st != 200 {
+		t.Fatalf("list: %d", st)
+	}
+	if len(accounts) != 2 || accounts[0].ID != keyAcct.ID || accounts[0].Position != 1 || accounts[1].Position != 2 {
+		t.Fatalf("list order/positions: %+v", accounts)
+	}
+	if accounts[0].AuthKind != "api_key" || accounts[1].AuthKind != "token" || accounts[1].ExpiresAt == nil {
+		t.Fatalf("auth kinds/expiry: %+v", accounts)
+	}
+
+	// Partial PATCH: rename and disable in one call; nothing else moves.
+	if st := h.do(c, "PATCH", "/api/admin/accounts/"+keyAcct.ID, `{"label":"renamed","disabled":true}`, nil); st != 204 {
+		t.Fatalf("patch: %d", st)
+	}
+	accounts = nil
+	h.do(c, "GET", "/api/admin/accounts", "", &accounts)
+	if accounts[0].Label != "renamed" || accounts[0].DisabledAt == nil || accounts[0].Proxy != "direct" || accounts[0].AuthKind != "api_key" {
+		t.Fatalf("after patch: %+v", accounts[0])
+	}
+
+	// Test button: the stub upstream checks the header shape per auth kind.
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path != "/v1/messages" && r.URL.Path != "/v1/models" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if r.Header.Get("Authorization") == "Bearer tok-1" || r.Header.Get("X-Api-Key") != "" {
+			w.Write([]byte(`{}`))
+			return
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error":{"message":"invalid key"}}`))
+	}))
+	defer up.Close()
+	if st := h.do(c, "PATCH", "/api/admin/accounts/"+tokAcct.ID, `{"base_url":"`+up.URL+`"}`, nil); st != 204 {
+		t.Fatalf("set base url: %d", st)
+	}
+	if st := h.do(c, "PATCH", "/api/admin/accounts/"+keyAcct.ID, `{"base_url":"`+up.URL+`"}`, nil); st != 204 {
+		t.Fatalf("set base url: %d", st)
+	}
+	var testRes accountTestResponse
+	if st := h.do(c, "POST", "/api/admin/accounts/"+tokAcct.ID+"/test", "", &testRes); st != 200 || !testRes.OK || testRes.Status != 200 {
+		t.Fatalf("token test: %d %+v", st, testRes)
+	}
+	// A bad key still answers 200, with ok=false and the provider's message.
+	var badRes accountTestResponse
+	if st := h.do(c, "POST", "/api/admin/accounts/"+keyAcct.ID+"/test", "", &badRes); st != 200 || badRes.OK || badRes.Error != "401: invalid key" {
+		t.Fatalf("bad key test: %d %+v", st, badRes)
+	}
+	accounts = nil
+	h.do(c, "GET", "/api/admin/accounts", "", &accounts)
+	if accounts[1].LastCheckOk == nil || !*accounts[1].LastCheckOk || accounts[1].LastCheckError != nil {
+		t.Fatalf("check recorded: %+v", accounts[1])
+	}
+
+	// Move: per-provider pool order, so two Claude accounts are needed.
+	var key2 struct {
+		ID string `json:"id"`
+	}
+	if st := h.do(c, "POST", "/api/admin/accounts", `{"provider":"claude","label":"cc key2","auth_kind":"api_key","access_token":"sk-2","proxy":"direct"}`, &key2); st != 201 {
+		t.Fatalf("second claude account: %d", st)
+	}
+	idx := func(id string) int {
+		accounts = nil
+		h.do(c, "GET", "/api/admin/accounts", "", &accounts)
+		for i, a := range accounts {
+			if a.ID == id {
+				return i
+			}
+		}
+		return -1
+	}
+	if st := h.do(c, "POST", "/api/admin/accounts/"+tokAcct.ID+"/move", `{"direction":"up"}`, nil); st != 409 {
+		t.Fatalf("move at top of its provider: %d", st)
+	}
+	if st := h.do(c, "POST", "/api/admin/accounts/"+tokAcct.ID+"/move", `{"direction":"down"}`, nil); st != 204 {
+		t.Fatalf("move down: %d", st)
+	}
+	if !(idx(key2.ID) < idx(tokAcct.ID)) {
+		t.Fatalf("after move, key2 should come first")
+	}
+	if st := h.do(c, "POST", "/api/admin/accounts/"+tokAcct.ID+"/move", `{"direction":"down"}`, nil); st != 409 {
+		t.Fatalf("move at bottom: %d", st)
 	}
 }
