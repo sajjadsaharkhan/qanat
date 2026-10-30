@@ -95,18 +95,31 @@ func (q *Queries) SnapshotCombos(ctx context.Context) ([]SnapshotCombosRow, erro
 	return items, nil
 }
 
+const snapshotGeneration = `-- name: SnapshotGeneration :one
+SELECT gen FROM config_generation
+`
+
+func (q *Queries) SnapshotGeneration(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, snapshotGeneration)
+	var gen int64
+	err := row.Scan(&gen)
+	return gen, err
+}
+
 const snapshotGrants = `-- name: SnapshotGrants :many
-SELECT user_id, amount_usd, expires_at
+SELECT user_id, sum(amount_usd)::numeric AS amount_usd, min(expires_at)::timestamptz AS next_expiry
 FROM quota_grants
 WHERE expires_at > now()
+GROUP BY user_id
 `
 
 type SnapshotGrantsRow struct {
-	UserID    string
-	AmountUsd float64
-	ExpiresAt time.Time
+	UserID     string
+	AmountUsd  float64
+	NextExpiry time.Time
 }
 
+// Active top-ups per user; they raise every window's limit (§10.3).
 func (q *Queries) SnapshotGrants(ctx context.Context) ([]SnapshotGrantsRow, error) {
 	rows, err := q.db.Query(ctx, snapshotGrants)
 	if err != nil {
@@ -116,7 +129,7 @@ func (q *Queries) SnapshotGrants(ctx context.Context) ([]SnapshotGrantsRow, erro
 	items := []SnapshotGrantsRow{}
 	for rows.Next() {
 		var i SnapshotGrantsRow
-		if err := rows.Scan(&i.UserID, &i.AmountUsd, &i.ExpiresAt); err != nil {
+		if err := rows.Scan(&i.UserID, &i.AmountUsd, &i.NextExpiry); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -449,4 +462,20 @@ func (q *Queries) SnapshotUsers(ctx context.Context) ([]SnapshotUsersRow, error)
 		return nil, err
 	}
 	return items, nil
+}
+
+const upsertStickyBinding = `-- name: UpsertStickyBinding :exec
+INSERT INTO sticky_bindings (user_id, provider, account_id) VALUES ($1, $2, $3)
+ON CONFLICT (user_id, provider) DO UPDATE SET account_id = EXCLUDED.account_id, updated_at = now()
+`
+
+type UpsertStickyBindingParams struct {
+	UserID    string
+	Provider  string
+	AccountID string
+}
+
+func (q *Queries) UpsertStickyBinding(ctx context.Context, arg UpsertStickyBindingParams) error {
+	_, err := q.db.Exec(ctx, upsertStickyBinding, arg.UserID, arg.Provider, arg.AccountID)
+	return err
 }

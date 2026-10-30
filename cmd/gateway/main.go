@@ -10,6 +10,9 @@ import (
 	"time"
 
 	"qanat/internal/config"
+	"qanat/internal/core/quota"
+	"qanat/internal/core/secretbox"
+	"qanat/internal/gateway"
 	"qanat/internal/platform"
 )
 
@@ -26,6 +29,14 @@ func main() {
 	ctx, stop := platform.SignalContext()
 	defer stop()
 
+	var box *secretbox.Box
+	if cfg.MasterKey != "" {
+		if box, err = secretbox.New(cfg.MasterKey); err != nil {
+			log.Error("QANAT_MASTER_KEY", "err", err)
+			os.Exit(2)
+		}
+	}
+
 	pg, err := platform.Postgres(ctx, cfg.PostgresDSN)
 	if err != nil {
 		log.Error("postgres", "err", err)
@@ -35,17 +46,25 @@ func main() {
 	rdb := platform.Redis(cfg.RedisAddr)
 	defer rdb.Close()
 
+	snap := gateway.NewStore(pg, box, log)
+	watchCtx, stopWatch := context.WithCancel(context.Background())
+	defer stopWatch()
+	go snap.Run(watchCtx)
+
+	pub := gateway.NewPublisher(rdb, log)
+	gw := gateway.New(snap, quota.NewStore(rdb), pub, pg, log, cfg.TestMode)
+
 	mux := http.NewServeMux()
-	platform.Health(mux, func(ctx context.Context) error {
-		if err := pg.Ping(ctx); err != nil {
-			return err
-		}
-		return rdb.Ping(ctx).Err()
-	})
+	gw.Register(mux)
+	platform.Health(mux, gw.Ready)
 
 	srv := &http.Server{Addr: cfg.GatewayAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	if err := platform.Serve(ctx, log, srv, shutdownGrace); err != nil {
 		log.Error("serve", "err", err)
 		os.Exit(1)
 	}
+	// Streams are done; flush buffered usage before exiting (§15.3).
+	drain, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pub.Close(drain)
 }

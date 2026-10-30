@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
+	"qanat/internal/core/secretbox"
 	"qanat/internal/store/db"
 )
 
@@ -35,6 +36,12 @@ type Options struct {
 	SessionTTL time.Duration
 	// SecureCookies sets the Secure flag; on everywhere except plain-HTTP local runs.
 	SecureCookies bool
+	// Box seals upstream credentials; nil means accounts can't store any.
+	Box *secretbox.Box
+	// Worker is the usage aggregation worker (flushed by a test endpoint).
+	Worker *Worker
+	// TestMode mounts the test-only endpoints (QANAT_TEST_MODE=1).
+	TestMode bool
 }
 
 // Server is the Admin API.
@@ -97,6 +104,19 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.Handle("PUT /api/admin/plans/{id}", admin(s.updatePlan))
 	mux.Handle("DELETE /api/admin/plans/{id}", admin(s.deletePlan))
 	mux.Handle("GET /api/admin/audit", admin(s.listAudit))
+	mux.Handle("GET /api/admin/users/{id}/usage", admin(s.userUsage))
+	mux.Handle("GET /api/admin/accounts", admin(s.listAccounts))
+	mux.Handle("POST /api/admin/accounts", admin(s.createAccount))
+	mux.Handle("DELETE /api/admin/accounts/{id}", admin(s.deleteAccount))
+	mux.Handle("GET /api/admin/mappings", admin(s.listMappings))
+	mux.Handle("PUT /api/admin/mappings", admin(s.replaceMappings))
+	mux.Handle("GET /api/admin/prices", admin(s.listPrices))
+	mux.Handle("POST /api/admin/prices", admin(s.setPrice))
+	mux.Handle("GET /api/me/requests", user(s.recentRequests))
+
+	if s.opts.TestMode {
+		s.registerTestMode(mux)
+	}
 }
 
 // --- responses ---------------------------------------------------------------

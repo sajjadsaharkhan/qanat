@@ -28,10 +28,12 @@ FROM plan_limits;
 SELECT plan_id, model_name
 FROM plan_models;
 
+-- Active top-ups per user; they raise every window's limit (§10.3).
 -- name: SnapshotGrants :many
-SELECT user_id, amount_usd, expires_at
+SELECT user_id, sum(amount_usd)::numeric AS amount_usd, min(expires_at)::timestamptz AS next_expiry
 FROM quota_grants
-WHERE expires_at > now();
+WHERE expires_at > now()
+GROUP BY user_id;
 
 -- name: SnapshotMappings :many
 SELECT pattern, is_glob, target_kind, provider, upstream_model, combo_id, priority
@@ -62,3 +64,10 @@ ORDER BY position;
 -- name: SnapshotStickyBindings :many
 SELECT user_id, provider, account_id
 FROM sticky_bindings;
+
+-- name: SnapshotGeneration :one
+SELECT gen FROM config_generation;
+
+-- name: UpsertStickyBinding :exec
+INSERT INTO sticky_bindings (user_id, provider, account_id) VALUES ($1, $2, $3)
+ON CONFLICT (user_id, provider) DO UPDATE SET account_id = EXCLUDED.account_id, updated_at = now();

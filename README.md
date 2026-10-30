@@ -10,7 +10,13 @@ Connect Claude Code:
 
 ## Status
 
-P0 in progress. Working now: the control plane (Admin API, root admin sign-in, Plans, keys, audit log) and the dashboard. The gateway answers health checks only; streaming arrives in P0 milestone M2.
+P0 in progress. Working now:
+
+- **Gateway:** Claude passthrough (zero bytes changed; only `model` rewritten when mapped), unbuffered streaming, key auth, global model mapping, Plan allowlists, USD quotas (rolling 5-hour, daily, weekly, monthly, per model) with rate limits, failover before the first byte, usage recording, `/v1/models`, `/metrics`. The acceptance suite passes against the real stack through Nginx; measured overhead p99 ≈ 4–6 ms.
+- **Control plane:** Admin API, root admin sign-in, Plans, keys, accounts, mapping, prices, usage aggregation, audit log.
+- **Dashboard:** overview, keys, setup, admin users/Plans/audit.
+
+Not yet: connecting real Claude subscription accounts with OAuth (M5), Keycloak sign-in, Codex and Antigravity (P1/P2).
 
 ## Run it locally
 

@@ -30,6 +30,10 @@ type Config struct {
 	// InsecureCookies drops the Secure cookie flag for plain-HTTP local runs
 	// (QANAT_INSECURE_COOKIES=1). Never set it behind TLS.
 	InsecureCookies bool
+	// MasterKey seals upstream credentials (PRD §15.2): base64 of 32 bytes,
+	// QANAT_MASTER_KEY or QANAT_MASTER_KEY_FILE. Empty: accounts can't hold
+	// credentials.
+	MasterKey string
 }
 
 // Load reads the environment and validates it.
@@ -44,6 +48,7 @@ func Load() (Config, error) {
 		RootPassword:     secret("QANAT_ROOT_PASSWORD"),
 		PublicGatewayURL: envOr("QANAT_PUBLIC_GATEWAY_URL", "http://localhost:8080"),
 		InsecureCookies:  os.Getenv("QANAT_INSECURE_COOKIES") == "1",
+		MasterKey:        secret("QANAT_MASTER_KEY"),
 	}
 	if c.RootPassword != "" && len(c.RootPassword) < 12 {
 		return c, fmt.Errorf("QANAT_ROOT_PASSWORD must be at least 12 characters")

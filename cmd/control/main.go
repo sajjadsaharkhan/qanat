@@ -10,6 +10,7 @@ import (
 
 	"qanat/internal/config"
 	"qanat/internal/control"
+	"qanat/internal/core/secretbox"
 	"qanat/internal/platform"
 	"qanat/internal/store"
 )
@@ -42,10 +43,27 @@ func main() {
 	}
 	log.Info("schema up to date")
 
+	var box *secretbox.Box
+	if cfg.MasterKey != "" {
+		if box, err = secretbox.New(cfg.MasterKey); err != nil {
+			log.Error("QANAT_MASTER_KEY", "err", err)
+			os.Exit(2)
+		}
+	}
+
+	// The single consumer of the usage stream (D17).
+	worker := control.NewWorker(pg, rdb, log)
+	workerCtx, stopWorker := context.WithCancel(context.Background())
+	defer stopWorker()
+	go worker.Run(workerCtx)
+
 	api := control.New(pg, rdb, log, control.Options{
 		RootPassword:  cfg.RootPassword,
 		GatewayURL:    cfg.PublicGatewayURL,
 		SecureCookies: !cfg.InsecureCookies,
+		Box:           box,
+		Worker:        worker,
+		TestMode:      cfg.TestMode,
 	})
 	if err := api.Bootstrap(ctx); err != nil {
 		log.Error("bootstrap", "err", err)

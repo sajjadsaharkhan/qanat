@@ -66,7 +66,12 @@ services:
     environment:
       QANAT_REDIS_ADDR: redis:6379
       QANAT_POSTGRES_DSN: postgres://qanat:qanat@postgres:5432/qanat_test?sslmode=disable
+      QANAT_TEST_MODE: "1" # exposes GET /test/generation for the acceptance driver
+      QANAT_MASTER_KEY: &test_master_key "dGVzdC1vbmx5LW1hc3Rlci1rZXktMzItYnl0ZXMhISE=" # TEST ONLY
       GOMEMLIMIT: 400MiB
+    # Acceptance tests run mock upstreams on the host; the gateway reaches
+    # them as host.docker.internal (built in on Docker Desktop; mapped here on Linux).
+    extra_hosts: ["host.docker.internal:host-gateway"]
     depends_on:
       redis: { condition: service_healthy }
       postgres: { condition: service_healthy }
@@ -87,6 +92,7 @@ services:
       QANAT_REDIS_ADDR: redis:6379
       QANAT_POSTGRES_DSN: postgres://qanat:qanat@postgres:5432/qanat_test?sslmode=disable
       QANAT_TEST_MODE: "1" # enables the test-only seeding endpoints used by the acceptance driver
+      QANAT_MASTER_KEY: *test_master_key
       # Split horizon: browsers reach the issuer at the public URL (also the
       # expected `iss` claim); the control plane fetches discovery and JWKS
       # over the compose network. Production Keycloak needs the same two

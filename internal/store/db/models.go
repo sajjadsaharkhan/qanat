@@ -48,6 +48,11 @@ type ComboMember struct {
 	UpstreamModel string
 }
 
+type ConfigGeneration struct {
+	ID  bool
+	Gen int64
+}
+
 type ModelMapping struct {
 	ID            string
 	Pattern       string

@@ -54,7 +54,6 @@ jobs:
         with: { go-version-file: go.mod }
       - run: make test-acceptance
       - name: latency gate
-        env: { QANAT_BENCH_KEY: "${{ secrets.QANAT_BENCH_KEY || 'qnt_live_bench_seeded' }}" }
         run: make bench
       - uses: actions/upload-artifact@v4
         if: always()

@@ -134,6 +134,105 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/me/requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The caller's last 200 requests (metadata only), newest first */
+        get: operations["recentRequests"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/users/{id}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["userUsage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listAccounts"];
+        put?: never;
+        post: operations["createAccount"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/accounts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["deleteAccount"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/mappings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listMappings"];
+        /** Replace the whole global mapping table */
+        put: operations["replaceMappings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/prices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listPrices"];
+        put?: never;
+        /** Add a confirmed price version, effective now */
+        post: operations["setPrice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/users": {
         parameters: {
             query?: never;
@@ -331,6 +430,87 @@ export interface components {
             user_count: number;
             /** Format: date-time */
             updated_at: string;
+        };
+        /** @enum {string} */
+        Provider: "claude" | "codex" | "antigravity";
+        Account: {
+            id: string;
+            provider: components["schemas"]["Provider"];
+            label: string;
+            base_url: string | null;
+            has_credentials: boolean;
+            /** @enum {string} */
+            state: "healthy" | "cooldown" | "disconnected";
+            /** Format: date-time */
+            cooldown_until: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        CreateAccountRequest: {
+            provider: components["schemas"]["Provider"];
+            label?: string;
+            /** @description Overrides the provider endpoint */
+            base_url?: string | null;
+            /** @description Sealed with the master key; never returned */
+            access_token?: string | null;
+        };
+        MappingRule: {
+            /** @description Exact name or glob (claude-*) */
+            pattern: string;
+            provider: components["schemas"]["Provider"];
+            /** @description null keeps the incoming name */
+            upstream_model: string | null;
+            /** @description Lower first */
+            priority: number;
+        };
+        Price: {
+            /** Format: int64 */
+            version: number;
+            upstream_model: string;
+            p_in: number;
+            p_out: number;
+            p_cache_read: number;
+            p_cache_write: number;
+            /** Format: date-time */
+            effective_from: string;
+            /** Format: date-time */
+            confirmed_at: string | null;
+        };
+        PriceRequest: {
+            upstream_model: string;
+            /** @description USD per 1M input tokens */
+            p_in: number;
+            p_out: number;
+            p_cache_read: number;
+            p_cache_write: number;
+        };
+        UsageTotals: {
+            input_tokens: number;
+            output_tokens: number;
+            cache_read_tokens: number;
+            cache_write_tokens: number;
+            cost_usd: number;
+            request_count: number;
+        };
+        RecentRequest: {
+            request_id: string;
+            /** Format: date-time */
+            at: string;
+            model: string;
+            provider: string;
+            upstream_model: string;
+            input_tokens: number;
+            output_tokens: number;
+            cache_read_tokens: number;
+            cache_write_tokens: number;
+            /** @description Cost in millionths of a USD */
+            cost_micro: number;
+            status: number;
+            aborted: boolean;
+            stop_reason?: string;
+            ttft_ms: number;
+            duration_ms: number;
+            error?: string;
         };
         AuditEntry: {
             /** Format: int64 */
@@ -557,6 +737,208 @@ export interface operations {
                     "application/json": components["schemas"]["Setup"];
                 };
             };
+        };
+    };
+    recentRequests: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecentRequest"][];
+                };
+            };
+        };
+    };
+    userUsage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description All-time totals */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageTotals"];
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    listAccounts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Account"][];
+                };
+            };
+        };
+    };
+    createAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateAccountRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+        };
+    };
+    deleteAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    listMappings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Exact rules first, then globs by priority */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MappingRule"][];
+                };
+            };
+        };
+    };
+    replaceMappings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MappingRule"][];
+            };
+        };
+        responses: {
+            /** @description Replaced */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+        };
+    };
+    listPrices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Newest price version per model */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Price"][];
+                };
+            };
+        };
+    };
+    setPrice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PriceRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: int64 */
+                        version: number;
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
         };
     };
     listUsers: {

@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -67,12 +68,12 @@ func TestMigrate_ConfigChangesNotify(t *testing.T) {
 	var userID, keyID string
 	must(t, pool.QueryRow(ctx, `INSERT INTO users (email, plan_id)
 		SELECT 'a@example.com', id FROM plans WHERE is_default RETURNING id`).Scan(&userID))
-	if p := wait(); p == nil || *p != "users" {
+	if p := wait(); p == nil || !strings.HasPrefix(*p, "users:") {
 		t.Fatalf("users insert: payload %v", p)
 	}
 	must(t, pool.QueryRow(ctx, `INSERT INTO api_keys (user_id, name, hash, prefix)
 		VALUES ($1, 'k', '\x01', 'qnt_live_') RETURNING id`, userID).Scan(&keyID))
-	if p := wait(); p == nil || *p != "api_keys" {
+	if p := wait(); p == nil || !strings.HasPrefix(*p, "api_keys:") {
 		t.Fatalf("key insert: payload %v", p)
 	}
 	_, err = pool.Exec(ctx, `UPDATE api_keys SET last_used_at = now(), last_ip = '10.0.0.1' WHERE id = $1`, keyID)
@@ -82,7 +83,7 @@ func TestMigrate_ConfigChangesNotify(t *testing.T) {
 	}
 	_, err = pool.Exec(ctx, `UPDATE api_keys SET revoked_at = now() WHERE id = $1`, keyID)
 	must(t, err)
-	if p := wait(); p == nil || *p != "api_keys" {
+	if p := wait(); p == nil || !strings.HasPrefix(*p, "api_keys:") {
 		t.Fatalf("revoke: payload %v", p)
 	}
 }

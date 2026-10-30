@@ -2,8 +2,10 @@ package mockupstream
 
 import (
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -43,11 +45,25 @@ type Server struct {
 	requests []*Request
 }
 
+// EnvBind, when set (e.g. "0.0.0.0:0"), makes New listen there instead of
+// loopback, so a gateway running in a container can reach the mock
+// (make test-acceptance sets it).
+const EnvBind = "QANAT_MOCKUPSTREAM_BIND"
+
 // New starts a server and registers cleanup on t.
 func New(t testing.TB) *Server {
 	t.Helper()
 	s := &Server{queues: map[string][]Script{}, defaults: map[string]Script{}, closing: make(chan struct{})}
-	s.srv = httptest.NewServer(http.HandlerFunc(s.handle))
+	s.srv = httptest.NewUnstartedServer(http.HandlerFunc(s.handle))
+	if addr := os.Getenv(EnvBind); addr != "" {
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			t.Fatalf("%s=%s: %v", EnvBind, addr, err)
+		}
+		s.srv.Listener.Close()
+		s.srv.Listener = ln
+	}
+	s.srv.Start()
 	t.Cleanup(func() {
 		close(s.closing)
 		s.srv.Close()

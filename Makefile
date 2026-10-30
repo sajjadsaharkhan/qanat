@@ -21,6 +21,7 @@ lint: ## gofmt + go vet
 	@test -z "$$(gofmt -l .)" || (gofmt -l . && echo "gofmt needed" && exit 1)
 	go vet ./...
 	go vet -tags reference ./...
+	go vet -tags qanat ./test/acceptance/...
 
 test: ## Unit tests, translator goldens, fixture checks (no Docker)
 	go test -short ./...
@@ -54,11 +55,12 @@ stack-down:
 
 test-acceptance: stack-up ## Acceptance suite against the real stack through Nginx
 	QANAT_ACCEPTANCE_GATEWAY=http://localhost:58080 QANAT_ACCEPTANCE_CONTROL=http://localhost:58081 \
-	  go test -tags qanat -count=1 ./test/acceptance/...
+	  QANAT_MOCKUPSTREAM_BIND=0.0.0.0:0 go test -tags qanat -count=1 ./test/acceptance/...
 
 bench: stack-up ## Latency gate: overhead p99 < 10ms and < 10% regression
+	key=$$(go run ./cmd/benchseed) && \
 	go run ./cmd/loadgen -gateway http://localhost:58080 -direct http://localhost:59090 \
-	  -key "$${QANAT_BENCH_KEY:?seed a key first}" -n 500 -c 50 \
+	  -key "$$key" -n 500 -c 50 \
 	  -budget-p99 10ms -baseline bench/baseline.json -max-regression 0.10 -out bench/result.json
 
 web-test: ## Dashboard unit/component tests
@@ -72,12 +74,17 @@ ci: lint test test-race test-reference ## What CI runs without Docker
 # --- Local run (deploy/local) -------------------------------------------------
 LOCAL := docker compose -f deploy/local/compose.yml
 ROOT_PW := deploy/local/secrets/root_password
+MASTER_KEY := deploy/local/secrets/master_key
 
 $(ROOT_PW):
 	@mkdir -p $(dir $@) && umask 077 && openssl rand -base64 24 | tr -d '\n' > $@
 	@echo "Generated a root password in $@"
 
-local-up: $(ROOT_PW) ## Run Qanat locally: dashboard on http://localhost:3000
+$(MASTER_KEY):
+	@mkdir -p $(dir $@) && umask 077 && openssl rand -base64 32 | tr -d '\n' > $@
+	@echo "Generated a master key in $@ (back it up: stored credentials can't be read without it)"
+
+local-up: $(ROOT_PW) $(MASTER_KEY) ## Run Qanat locally: dashboard on http://localhost:3000
 	$(LOCAL) up -d --build --wait
 	@echo ""
 	@echo "  Dashboard  http://localhost:$${QANAT_WEB_PORT:-3000}"

@@ -36,9 +36,10 @@ services:
       QANAT_POSTGRES_DSN: postgres://qanat:qanat-local@postgres:5432/qanat?sslmode=disable
       QANAT_REDIS_ADDR: redis:6379
       QANAT_ROOT_PASSWORD_FILE: /run/secrets/root_password
+      QANAT_MASTER_KEY_FILE: /run/secrets/master_key
       QANAT_PUBLIC_GATEWAY_URL: http://localhost:${QANAT_GATEWAY_PORT:-18080}
       QANAT_INSECURE_COOKIES: "1" # plain HTTP on localhost
-    secrets: [root_password]
+    secrets: [root_password, master_key]
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -53,7 +54,9 @@ services:
     environment:
       QANAT_POSTGRES_DSN: postgres://qanat:qanat-local@postgres:5432/qanat?sslmode=disable
       QANAT_REDIS_ADDR: redis:6379
+      QANAT_MASTER_KEY_FILE: /run/secrets/master_key
       GOMEMLIMIT: 400MiB
+    secrets: [master_key]
     ports: ["${QANAT_GATEWAY_PORT:-18080}:8080"]
     depends_on:
       control: { condition: service_healthy }
@@ -78,6 +81,8 @@ services:
 secrets:
   root_password:
     file: ./secrets/root_password
+  master_key: # seals upstream credentials at rest (PRD §15.2)
+    file: ./secrets/master_key
 
 volumes:
   postgres:

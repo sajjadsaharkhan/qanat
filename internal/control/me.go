@@ -15,6 +15,7 @@ import (
 
 	"qanat/internal/core/apikey"
 	"qanat/internal/core/quota"
+	"qanat/internal/core/usage"
 	"qanat/internal/store/db"
 )
 
@@ -240,4 +241,21 @@ func itoa(n int) string { return strconv.Itoa(n) }
 func isBadUUID(err error) bool {
 	var pe *pgconn.PgError
 	return errors.As(err, &pe) && pe.Code == "22P02"
+}
+
+// --- recent requests -----------------------------------------------------------
+
+// recentRequests returns the caller's last requests from the ring buffer the
+// gateway keeps (PRD §10.6 point 7). Metadata only; never content.
+func (s *Server) recentRequests(w http.ResponseWriter, r *http.Request, u *db.GetUserRow) {
+	raw, err := s.rdb.LRange(r.Context(), usage.RecentKey(u.ID), 0, usage.RecentLen-1).Result()
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	out := make([]json.RawMessage, 0, len(raw))
+	for _, e := range raw {
+		out = append(out, json.RawMessage(e))
+	}
+	writeJSON(w, http.StatusOK, out)
 }

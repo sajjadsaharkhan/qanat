@@ -97,19 +97,26 @@ Tests to add as phases land: sticky routing (REQ-POOL-03), rolling and periodic 
 
 ### The `qanat` driver
 
-`test/acceptance/qanat_driver_test.go` is a placeholder that **fails every test on purpose** until implemented, so the acceptance CI job can never pass by skipping. Implementing it is a P0 task. It talks to:
+`test/acceptance/qanat_driver_test.go` runs the suite against the real stack. It talks to:
 
 - the gateway through Nginx (`QANAT_ACCEPTANCE_GATEWAY`, default `http://localhost:58080`);
 - the control plane (`QANAT_ACCEPTANCE_CONTROL`, default `http://localhost:58081`), using the normal Admin API where possible, plus **test-only endpoints** that exist only when `QANAT_TEST_MODE=1`:
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /test/reset` | truncate all tables and flush Redis |
-| `POST /test/users` `{email}` → `{id}` | create a user without an OIDC login |
-| `POST /test/session` `{user_id}` → `{admin_token}` | Admin API credentials for seeding |
+| `POST /test/reset` | truncate all tables, flush Redis, restore the default Plan |
+| `POST /test/users` `{email, role?}` → `{id}` | create a user without an OIDC login |
+| `POST /test/session` `{user_id}` → `{cookie}` | a dashboard session for that user (admin calls, key creation) |
 | `POST /test/flush-usage` | make the aggregation worker drain Redis Streams now (keeps `Usage` polling short) |
+| `GET /test/generation` (control and gateway) | the config generation in the database, and the one the gateway's snapshot was read at |
 
-`QANAT_TEST_MODE` must refuse to start if any production-looking setting is present (e.g. a non-localhost OIDC issuer).
+`QANAT_TEST_MODE` refuses to start if the OIDC issuer is not local.
+
+**No races with config reloads.** The gateway applies config asynchronously (`LISTEN/NOTIFY`). Every config change bumps a monotonic generation (migration 0003); after each change the driver waits until the gateway reports that generation, so a test never runs against a stale snapshot.
+
+**Mock upstreams on the host.** Tests start mock upstreams in-process; the containerised gateway reaches them as `host.docker.internal`. `make test-acceptance` sets `QANAT_MOCKUPSTREAM_BIND=0.0.0.0:0` so this also works on Linux, where the compose file maps `host.docker.internal` to the host gateway.
+
+**Nginx and `X-Accel-Buffering`.** Nginx consumes `X-Accel-*` response headers, so the test edge passes it through with `proxy_pass_header X-Accel-Buffering;`. Without that line `TestPassthrough_ResponseBytesUnchanged` fails even though the gateway sets the header.
 
 ### Latency tests
 
@@ -180,7 +187,7 @@ The fixtures shipped now are **synthetic** (marked in their `meta.note`). Replac
 
 ## Benchmarks and the latency gate
 
-`cmd/loadgen` sends the same streaming request to the mock upstream directly and through the gateway (via Nginx), with concurrency, and compares TTFT distributions. `make bench` fails when:
+`cmd/loadgen` sends the same streaming request to the mock upstream directly and through the gateway (via Nginx), with concurrency, and compares TTFT distributions. `make bench` first runs `cmd/benchseed`, which seeds a bench user, Plan, mapping, price and an account pointing at the compose `mockupstream`, and hands loadgen a fresh key. It fails when:
 
 - overhead p99 exceeds 10 ms (`-budget-p99`), or
 - overhead p99 regresses more than 10% against `bench/baseline.json` (REQ-PERF-05), or
@@ -212,7 +219,7 @@ See [design.md §11](../design.md#11-testing-the-ui). In short:
 |---|---|---|
 | `go` | lint, race, reference acceptance, fixture checks | always |
 | `integration` | everything with Redis/PostgreSQL service containers | always |
-| `acceptance` | `make test-acceptance` + `make bench` through Nginx | once `cmd/gateway/main.go` exists |
+| `acceptance` | `make test-acceptance` + `make bench` through Nginx | always (the gateway exists) |
 | `web` | typecheck, lint, Vitest; Playwright once `cmd/control/main.go` exists | once `web/package-lock.json` exists |
 
 Jobs light up automatically as P0 lands, so the gates exist before the code they guard.
