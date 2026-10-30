@@ -2,9 +2,7 @@
 
 import {
   Activity,
-  BarChart3,
   ChartColumnStacked,
-  Gauge,
   KeyRound,
   LayoutGrid,
   LogOut,
@@ -53,14 +51,12 @@ type NavItem = { href: string; label: string; icon: typeof LayoutGrid };
 
 const userNav: NavItem[] = [
   { href: "/", label: "Overview", icon: LayoutGrid },
-  { href: "/usage", label: "Usage", icon: BarChart3 },
   { href: "/requests", label: "Requests", icon: Activity },
   { href: "/keys", label: "Keys", icon: KeyRound },
   { href: "/setup", label: "Setup", icon: SquareTerminal },
 ];
 
 const adminNav: NavItem[] = [
-  { href: "/admin", label: "Needs you", icon: Gauge },
   { href: "/admin/users", label: "Users", icon: Users },
   { href: "/admin/usage", label: "Usage & quotas", icon: ChartColumnStacked },
   { href: "/admin/plans", label: "Plans", icon: Wallet },
@@ -72,7 +68,7 @@ const adminNav: NavItem[] = [
 ];
 
 function isActive(pathname: string, href: string) {
-  return href === "/" || href === "/admin" ? pathname === href : pathname.startsWith(href);
+  return href === "/" ? pathname === href : pathname.startsWith(href);
 }
 
 function NavGroup({ label, items }: { label?: string; items: NavItem[] }) {

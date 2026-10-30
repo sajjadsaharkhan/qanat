@@ -3,11 +3,11 @@
 import { ArrowLeft, ChartColumnStacked } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { Suspense, useState } from "react";
+import { Suspense } from "react";
 
 import { EmptyState, PageHeader, SectionHeader, Tag } from "@/components/qanat/page";
 import { QuotaList, useNow } from "@/components/qanat/quota-list";
-import { PeriodSelector, UsageStats, type Period } from "@/components/qanat/usage-overview/usage-stats";
+import { PeriodSelector, UsageStats, usePeriod } from "@/components/qanat/usage-overview/usage-stats";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -15,8 +15,17 @@ import { api, errorMessage } from "@/lib/api/client";
 
 /** One person's quota windows and usage report, as an admin sees it. */
 export default function AdminUserUsagePage() {
+  // Filters live in the URL (useSearchParams), which needs a Suspense boundary.
+  return (
+    <Suspense fallback={<Skeleton className="h-96 w-full" />}>
+      <AdminUserUsage />
+    </Suspense>
+  );
+}
+
+function AdminUserUsage() {
   const { id } = useParams<{ id: string }>();
-  const [period, setPeriod] = useState<Period>("today");
+  const [period, setPeriod] = usePeriod();
   const now = useNow();
   const usage = api.useQuery("get", "/api/admin/usage/{id}", { params: { path: { id }, query: { days: 7 } } }, { refetchInterval: 15_000 });
   const u = usage.data?.user;

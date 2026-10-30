@@ -142,6 +142,7 @@ Rules:
 
 - Sentence case everywhere: titles, buttons, menu items, column headers. **No all-caps labels** and no eyebrow labels above headings.
 - Numbers that update (usage, counters, countdowns) use `tabular-nums` so digits don't jitter.
+- Money goes through `formatUsd` only: whole amounts drop the cents (`$10,000`, `$0`), other amounts show cents (`$14.20`), and amounts under $1 keep up to four decimals (`$0.0731`) because a single request costs that little. Never `toFixed` money.
 - Line length for prose (help text, empty states) stays under 72 characters.
 
 ---
@@ -213,8 +214,7 @@ shadcn `Sidebar` (collapsible to icons with `⌘B`), a slim header, and a conten
 ┌────────────┬─────────────────────────────────────────────────────┐
 │ [mark] Qanat│  Usage                              ◐  [avatar ▾]  │ ← header 48px: title, theme, user menu
 │            ├─────────────────────────────────────────────────────┤
-│ Overview   │                                                     │
-│ Usage      │   content column, max-width 1120px, left-aligned    │
+│ Overview   │   content column, max-width 1120px, left-aligned    │
 │ Requests   │   24px gutters (16px on mobile)                     │
 │ Keys       │                                                     │
 │ Setup      │                                                     │
@@ -264,6 +264,8 @@ Recent requests                                           View all
 claude-sonnet-4-6   Sonnet   212 ms   18.2k tok   $0.07   2m ago
 claude-opus-4-7     Opus     340 ms   41.0k tok   $0.62   5m ago   ⊘ aborted
 ```
+
+Overview is the user's one home page: the quota block, then their usage (the 9router-style stats, cards, chart and breakdown, with the period selector in the page header), including the recent requests panel beside the topology. There is no separate Usage page; `/usage` redirects to `/`, keeping its query (period, filters). Admins get the same shape on Usage & quotas.
 
 The hero sentence is computed from the window with the least remaining headroom. When every window is fine it reads plainly ("$3.42 left today"); it never celebrates.
 

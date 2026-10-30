@@ -5,6 +5,7 @@ import { Activity } from "lucide-react";
 import { EmptyState, PageHeader, Tag } from "@/components/qanat/page";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { formatUsd } from "@/lib/format";
 import { api } from "@/lib/api/client";
 
 const timeFmt = new Intl.DateTimeFormat("en-US", {
@@ -45,12 +46,12 @@ export default function RequestsPage() {
             </TableHeader>
             <TableBody data-volatile>
               {reqs.data.map((r) => {
-                const cost = (r.cost_micro / 1_000_000).toLocaleString("en-US", {
-                  style: "currency",
-                  currency: "USD",
-                  minimumFractionDigits: 4,
-                  maximumFractionDigits: 6,
-                });
+                // Per-request costs are tiny: keep their precision below $1.
+                const usd = r.cost_micro / 1_000_000;
+                const cost =
+                  usd !== 0 && usd < 1
+                    ? usd.toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 4, maximumFractionDigits: 6 })
+                    : formatUsd(usd);
                 return (
                   <TableRow key={r.request_id}>
                     <TableCell className="text-meta text-muted-foreground whitespace-nowrap">

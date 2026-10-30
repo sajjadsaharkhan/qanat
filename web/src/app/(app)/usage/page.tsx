@@ -1,26 +1,11 @@
-"use client";
+import { permanentRedirect } from "next/navigation";
 
-import { BarChart3 } from "lucide-react";
-import { Suspense, useState } from "react";
-
-import { PageHeader } from "@/components/qanat/page";
-import { PeriodSelector, UsageStats, type Period } from "@/components/qanat/usage-overview/usage-stats";
-import { Skeleton } from "@/components/ui/skeleton";
-
-/** Your usage, in 9router's Overview layout (see usage-overview/LICENSE-9router). */
-export default function UsagePage() {
-  const [period, setPeriod] = useState<Period>("today");
-  return (
-    <>
-      <PageHeader
-        title="Usage"
-        icon={BarChart3}
-        description="Your requests, tokens and estimated cost. Updates every few seconds."
-        actions={<PeriodSelector period={period} onChange={setPeriod} />}
-      />
-      <Suspense fallback={<Skeleton className="h-96 w-full" />}>
-        <UsageStats scope={{ kind: "me" }} period={period} />
-      </Suspense>
-    </>
-  );
+/** Usage now lives on Overview (design.md §7.3); old links keep their filters. */
+export default async function UsagePage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(await searchParams)) {
+    for (const value of Array.isArray(v) ? v : v === undefined ? [] : [v]) params.append(k, value);
+  }
+  const q = params.toString();
+  permanentRedirect(q ? `/?${q}` : "/");
 }

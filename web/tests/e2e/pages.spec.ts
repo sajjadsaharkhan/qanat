@@ -7,14 +7,12 @@ import { expect, expectAccessible, expectStillUnderReducedMotion, signIn, test }
 
 const userPages = [
   { path: "/", heading: "Overview" },
-  { path: "/usage", heading: "Usage" },
   { path: "/requests", heading: "Recent requests" },
   { path: "/keys", heading: "Keys" },
   { path: "/setup", heading: "Setup" },
 ];
 
 const adminPages = [
-  { path: "/admin", heading: "Needs you" },
   { path: "/admin/users", heading: "Users" },
   { path: "/admin/plans", heading: "Plans" },
   { path: "/admin/accounts", heading: "Accounts" },

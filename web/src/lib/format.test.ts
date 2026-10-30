@@ -18,7 +18,12 @@ describe("quotaLevel", () => {
 describe("formatUsd", () => {
   it("keeps precision for single-request costs", () => expect(formatUsd(0.0731)).toBe("$0.0731"));
   it("rounds larger amounts to cents", () => expect(formatUsd(14.2)).toBe("$14.20"));
-  it("formats zero plainly", () => expect(formatUsd(0)).toBe("$0.00"));
+  it("formats zero plainly", () => expect(formatUsd(0)).toBe("$0"));
+  it("drops cents from whole amounts", () => {
+    expect(formatUsd(10_000)).toBe("$10,000");
+    expect(formatUsd(12.004)).toBe("$12");
+    expect(formatUsd(10_000.5)).toBe("$10,000.50");
+  });
 });
 
 describe("formatTokens", () => {

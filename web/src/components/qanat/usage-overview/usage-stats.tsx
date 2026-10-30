@@ -8,18 +8,22 @@
  */
 "use client";
 
-import { Loader2 } from "lucide-react";
+import { ReducedMotionConfig } from "@animate-ui/react/utils/motion";
+import { CircleX } from "lucide-react";
 import dynamic from "next/dynamic";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Tag } from "@/components/qanat/page";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useSearchParam } from "@/hooks/use-search-param";
 import { api, type Schemas } from "@/lib/api/client";
+import { modelTier, tierDotClass } from "@/lib/model-tier";
 import { cn } from "@/lib/utils";
 
 import { OverviewCards } from "./overview-cards";
-import { Card, fmt, fmtTime, providerName, Segmented } from "./shared";
-import { UsageTable, type Column, type Group, type Row } from "./usage-table";
+import { Reveal } from "./motion";
+import { Card, CardHeading, fmtTokens, providerName, Segmented } from "./shared";
+import { summarize, UsageBreakdown, type Group, type Row, type ViewMode } from "./usage-table";
 
 // Lazy-load: keeps @xyflow/react and recharts out of the initial bundle
 const ProviderTopology = dynamic(() => import("./provider-topology").then((m) => m.ProviderTopology), { ssr: false });
@@ -39,6 +43,12 @@ export const PERIODS: { value: Period; label: string }[] = [
   { value: "60d", label: "60D" },
   { value: "all", label: "All" },
 ];
+
+/** usePeriod keeps the selected period in the URL (`?period=7d`). */
+export function usePeriod() {
+  return useSearchParam<Period>("period", "today", PERIOD_VALUES);
+}
+const PERIOD_VALUES: Period[] = ["today", "24h", "7d", "30d", "60d", "all"];
 
 /** The period selector, as 9router places it on the page's top row. */
 export function PeriodSelector({ period, onChange }: { period: Period; onChange: (p: Period) => void }) {
@@ -65,44 +75,39 @@ function TimeAgo({ timestamp }: { timestamp: string }) {
 
 function RecentRequests({ requests }: { requests: Schemas["RecentUsage"][] }) {
   return (
-    <Card className="flex min-w-0 flex-col overflow-hidden p-4" style={{ height: 480 }}>
-      <div className="shrink-0 border-b px-1 py-2">
-        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Recent Requests</span>
-      </div>
+    <Card className="flex min-w-0 flex-col gap-3 overflow-hidden p-4 sm:p-5 lg:h-[480px]">
+      <CardHeading title="Recent requests" hint={requests.length ? `Latest ${requests.length}` : undefined} />
       {!requests.length ? (
-        <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">No requests yet.</div>
+        <div className="flex flex-1 items-center justify-center py-10 text-sm text-muted-foreground">No requests yet.</div>
       ) : (
-        <div className="flex-1 overflow-y-auto">
-          <table className="w-full min-w-[300px] border-collapse text-xs">
+        <div className="-mx-4 max-h-[420px] flex-1 overflow-y-auto sm:-mx-5 lg:max-h-none">
+          <table className="w-full min-w-[300px] border-collapse text-sm">
             <thead className="sticky top-0 z-10 bg-card">
-              <tr className="border-b">
-                <th className="w-2 py-1.5 text-left font-semibold text-muted-foreground">
-                  <span className="sr-only">Status</span>
-                </th>
-                <th className="py-1.5 text-left font-semibold text-muted-foreground">Model</th>
-                <th className="whitespace-nowrap py-1.5 text-right font-semibold text-muted-foreground">In / Out</th>
-                <th className="py-1.5 text-right font-semibold text-muted-foreground">When</th>
+              <tr className="border-b text-meta text-muted-foreground">
+                <th className="py-2 ps-4 text-left font-medium sm:ps-5">Model</th>
+                <th className="whitespace-nowrap py-2 text-right font-medium">In / out</th>
+                <th className="py-2 pe-4 text-right font-medium sm:pe-5">When</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-border/50">
+            <tbody className="divide-y divide-border/60">
               {requests.map((r, i) => {
                 const ok = r.status === "ok";
                 return (
-                  <tr key={i} className="transition-colors hover:bg-muted">
-                    <td className="py-1.5">
-                      <span
-                        role="img"
-                        aria-label={ok ? "Succeeded" : "Failed"}
-                        className={cn("block size-1.5 rounded-full", ok ? "bg-primary" : "bg-destructive")}
-                      />
+                  <tr key={`${r.timestamp}-${i}`} className="transition-colors duration-200 hover:bg-muted/60">
+                    <td className="max-w-[160px] py-2 ps-4 sm:ps-5" title={r.model}>
+                      <span className="flex items-center gap-2">
+                        {ok ? (
+                          <span aria-hidden className={cn("size-2 shrink-0 rounded-full", tierDotClass(modelTier(r.model)))} />
+                        ) : (
+                          <CircleX className="size-3.5 shrink-0 text-destructive-text" aria-label="Failed" />
+                        )}
+                        <span className={cn("truncate font-mono text-xs", !ok && "text-destructive-text")}>{r.model}</span>
+                      </span>
                     </td>
-                    <td className="max-w-[120px] truncate py-1.5 font-mono" title={r.model}>
-                      {r.model}
+                    <td className="whitespace-nowrap py-2 text-right tabular-nums">
+                      {fmtTokens(r.prompt_tokens)} <span className="text-muted-foreground">/ {fmtTokens(r.completion_tokens)}</span>
                     </td>
-                    <td className="whitespace-nowrap py-1.5 text-right tabular-nums">
-                      {fmt(r.prompt_tokens)}↑ <span className="text-muted-foreground">{fmt(r.completion_tokens)}↓</span>
-                    </td>
-                    <td className="whitespace-nowrap py-1.5 text-right text-muted-foreground">
+                    <td className="whitespace-nowrap py-2 pe-4 text-right text-muted-foreground sm:pe-5">
                       <TimeAgo timestamp={r.timestamp} />
                     </td>
                   </tr>
@@ -116,7 +121,15 @@ function RecentRequests({ requests }: { requests: Schemas["RecentUsage"][] }) {
   );
 }
 
-type Item = Row & { rawModel: string; provider: string; accountName?: string; keyName?: string; keyPrefix?: string; userEmail?: string; endpoint?: string };
+type Item = Row & {
+  rawModel: string;
+  provider: string;
+  accountName?: string;
+  keyName?: string;
+  keyPrefix?: string;
+  userEmail?: string;
+  endpoint?: string;
+};
 
 function toItems(groups: UsageGroup[]): Item[] {
   return groups.map((d, i) => {
@@ -150,19 +163,7 @@ function toItems(groups: UsageGroup[]): Item[] {
   });
 }
 
-function sortData(items: Item[], sortBy: string, sortOrder: string) {
-  return [...items].sort((a, b) => {
-    let valA = (a as Record<string, unknown>)[sortBy] as string | number | null;
-    let valB = (b as Record<string, unknown>)[sortBy] as string | number | null;
-    if (typeof valA === "string") valA = valA.toLowerCase();
-    if (typeof valB === "string") valB = valB.toLowerCase();
-    if ((valA ?? "") < (valB ?? "")) return sortOrder === "asc" ? -1 : 1;
-    if ((valA ?? "") > (valB ?? "")) return sortOrder === "asc" ? 1 : -1;
-    return 0;
-  });
-}
-
-type KeyField = "rawModel" | "accountName" | "keyName" | "endpoint";
+type KeyField = "rawModel" | "accountName" | "keyName" | "userEmail" | "endpoint";
 
 function getGroupKey(item: Item, keyField: KeyField) {
   switch (keyField) {
@@ -175,240 +176,164 @@ function getGroupKey(item: Item, keyField: KeyField) {
       const label = item.keyPrefix ? `${name} (${item.keyPrefix}…)` : name;
       return item.userEmail ? `${label} · ${item.userEmail}` : label;
     }
+    case "userEmail":
+      return item.userEmail || "Unknown user";
     case "endpoint":
       return item.endpoint || "Unknown Endpoint";
   }
 }
 
 function groupDataByKey(data: Item[], keyField: KeyField): Group<Item>[] {
-  const groups: Record<string, Group<Item>> = {};
+  const groups = new Map<string, Item[]>();
   for (const item of data) {
     const gk = getGroupKey(item, keyField);
-    if (!groups[gk]) {
-      groups[gk] = {
-        groupKey: gk,
-        summary: { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, totalTokens: 0, cost: 0, totalCost: 0, inputCost: 0, cachedCost: 0, outputCost: 0, lastUsed: null },
-        items: [],
-      };
-    }
-    const s = groups[gk].summary;
-    s.requests += item.requests;
-    s.promptTokens += item.promptTokens;
-    s.completionTokens += item.completionTokens;
-    s.cachedTokens += item.cachedTokens;
-    s.totalTokens += item.totalTokens;
-    s.cost += item.cost;
-    s.totalCost += item.totalCost;
-    s.inputCost += item.inputCost;
-    s.cachedCost += item.cachedCost;
-    s.outputCost += item.outputCost;
-    if (item.lastUsed && (!s.lastUsed || new Date(item.lastUsed) > new Date(s.lastUsed))) s.lastUsed = item.lastUsed;
-    groups[gk].items.push(item);
+    groups.set(gk, [...(groups.get(gk) ?? []), item]);
   }
-  return Object.values(groups);
+  return [...groups].map(([groupKey, items]) => ({ groupKey, items, summary: summarize(items) }));
 }
 
-const MODEL_COLUMNS: Column[] = [
-  { field: "rawModel", label: "Model" },
-  { field: "provider", label: "Provider" },
-  { field: "requests", label: "Requests", align: "right" },
-  { field: "lastUsed", label: "Last Used", align: "right" },
+type TableView = "model" | "account" | "apiKey" | "user" | "endpoint";
+const USER_VIEWS: TableView[] = ["model", "account", "user", "endpoint"];
+const KEY_VIEWS: TableView[] = ["model", "account", "apiKey", "endpoint"];
+// Everyone's usage breaks down by person; one person's (or your own) by key.
+const tableOptions = (byUser: boolean): { value: TableView; label: string }[] => [
+  { value: "model", label: "Model" },
+  { value: "account", label: "Account" },
+  byUser ? { value: "user", label: "User" } : { value: "apiKey", label: "API key" },
+  { value: "endpoint", label: "Endpoint" },
 ];
-// 9router lists Model, Provider, Account here but renders account first in
-// detail rows; the header follows the rows so columns line up.
-const ACCOUNT_COLUMNS: Column[] = [
-  { field: "accountName", label: "Account" },
-  { field: "rawModel", label: "Model" },
-  { field: "provider", label: "Provider" },
-  { field: "requests", label: "Requests", align: "right" },
-  { field: "lastUsed", label: "Last Used", align: "right" },
-];
-const API_KEY_COLUMNS: Column[] = [
-  { field: "keyName", label: "API Key Name" },
-  { field: "rawModel", label: "Model" },
-  { field: "provider", label: "Provider" },
-  { field: "requests", label: "Requests", align: "right" },
-  { field: "lastUsed", label: "Last Used", align: "right" },
-];
-const ENDPOINT_COLUMNS: Column[] = [
-  { field: "endpoint", label: "Endpoint" },
-  { field: "rawModel", label: "Model" },
-  { field: "provider", label: "Provider" },
-  { field: "requests", label: "Requests", align: "right" },
-  { field: "lastUsed", label: "Last Used", align: "right" },
-];
-
-type TableView = "model" | "account" | "apiKey" | "endpoint";
-const TABLE_OPTIONS: { value: TableView; label: string }[] = [
-  { value: "model", label: "Usage by Model" },
-  { value: "account", label: "Usage by Account" },
-  { value: "apiKey", label: "Usage by API Key" },
-  { value: "endpoint", label: "Usage by Endpoint" },
-];
-
-const dash = <td className="px-6 py-3 text-muted-foreground">—</td>;
-const counts = (requests: number, lastUsed: string | null) => (
-  <>
-    <td className="px-6 py-3 text-right tabular-nums">{fmt(requests)}</td>
-    <td className="whitespace-nowrap px-6 py-3 text-right text-muted-foreground">{fmtTime(lastUsed)}</td>
-  </>
-);
 
 export type Scope = { kind: "me" } | { kind: "admin"; userId?: string };
 
 function useOverview(scope: Scope, period: Period) {
   const tz = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
-  const opts = { refetchInterval: 5_000, placeholderData: (prev: Overview | undefined) => prev };
+  const opts = {
+    refetchInterval: 5_000,
+    placeholderData: (prev: Overview | undefined) => prev,
+  };
   const me = api.useQuery("get", "/api/me/usage/overview", { params: { query: { period, tz } } }, { ...opts, enabled: scope.kind === "me" });
   const admin = api.useQuery(
     "get",
     "/api/admin/usage/overview",
-    { params: { query: { period, tz, user_id: scope.kind === "admin" ? scope.userId : undefined } } },
+    {
+      params: {
+        query: {
+          period,
+          tz,
+          user_id: scope.kind === "admin" ? scope.userId : undefined,
+        },
+      },
+    },
     { ...opts, enabled: scope.kind === "admin" },
   );
   return scope.kind === "me" ? me : admin;
 }
 
 export function UsageStats({ scope, period }: { scope: Scope; period: Period }) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
-
-  const sortBy = searchParams.get("sortBy") || "rawModel";
-  const sortOrder = searchParams.get("sortOrder") || "asc";
-
-  const [tableView, setTableView] = useState<TableView>("model");
-  const [viewMode, setViewMode] = useState<"costs" | "tokens">("costs");
+  const byUser = scope.kind === "admin" && !scope.userId;
+  // The grouping and values live in the URL beside sortBy/sortOrder.
+  const [tableView, setTableView] = useSearchParam<TableView>("group", "model", byUser ? USER_VIEWS : KEY_VIEWS);
+  const [viewMode, setViewMode] = useSearchParam<ViewMode>("values", "costs", ["costs", "tokens"]);
   const query = useOverview(scope, period);
   const stats = query.data;
   const loading = query.isPending;
   const fetching = query.isFetching && !loading && query.isPlaceholderData;
 
-  const toggleSort = useCallback(
-    (field: string) => {
-      const params = new URLSearchParams(searchParams.toString());
-      if (params.get("sortBy") === field) {
-        params.set("sortOrder", params.get("sortOrder") === "asc" ? "desc" : "asc");
-      } else {
-        params.set("sortBy", field);
-        params.set("sortOrder", "asc");
-      }
-      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
-    },
-    [searchParams, router, pathname],
-  );
-
   const active = useMemo(() => {
     if (!stats) return null;
-    const badge = (provider: string) => <Tag>{provider}</Tag>;
+    const model = (i: Item) => `${i.rawModel} · ${i.provider}`;
+    const tierDot = (name: string) => <span aria-hidden className={cn("size-2 shrink-0 rounded-full", tierDotClass(modelTier(name)))} />;
     switch (tableView) {
       case "model":
         return {
-          columns: MODEL_COLUMNS,
-          groupedData: groupDataByKey(sortData(toItems(stats.by_model), sortBy, sortOrder), "rawModel"),
+          noun: ["model", "models"] as [string, string],
+          groups: groupDataByKey(toItems(stats.by_model), "rawModel"),
           storageKey: "usage-stats:expanded-models",
           emptyMessage: "No usage recorded yet.",
-          renderSummaryCells: (g: Group<Item>) => (
-            <>
-              {dash}
-              {counts(g.summary.requests, g.summary.lastUsed)}
-            </>
-          ),
-          renderDetailCells: (item: Item) => (
-            <>
-              <td className="px-6 py-3 font-medium">{item.rawModel}</td>
-              <td className="px-6 py-3">{badge(item.provider)}</td>
-              {counts(item.requests, item.lastUsed)}
-            </>
-          ),
+          groupDecor: tierDot,
+          detail: (i: Item) => ({ primary: <Tag>{i.provider}</Tag> }),
+          searchText: (i: Item) => model(i),
         };
       case "account":
         return {
-          columns: ACCOUNT_COLUMNS,
-          groupedData: groupDataByKey(sortData(toItems(stats.by_account), sortBy, sortOrder), "accountName"),
+          noun: ["account", "accounts"] as [string, string],
+          groups: groupDataByKey(toItems(stats.by_account), "accountName"),
           storageKey: "usage-stats:expanded-accounts",
           emptyMessage: "No account-specific usage recorded yet.",
-          renderSummaryCells: (g: Group<Item>) => (
-            <>
-              {dash}
-              {dash}
-              {counts(g.summary.requests, g.summary.lastUsed)}
-            </>
-          ),
-          renderDetailCells: (item: Item) => (
-            <>
-              <td className="px-6 py-3 font-medium">{item.accountName}</td>
-              <td className="px-6 py-3 font-medium">{item.rawModel}</td>
-              <td className="px-6 py-3">{badge(item.provider)}</td>
-              {counts(item.requests, item.lastUsed)}
-            </>
-          ),
+          detail: (i: Item) => ({ primary: i.rawModel, secondary: i.provider }),
+          searchText: (i: Item) => `${model(i)} ${i.accountName ?? ""}`,
         };
       case "apiKey":
         return {
-          columns: API_KEY_COLUMNS,
-          groupedData: groupDataByKey(sortData(toItems(stats.by_api_key), sortBy, sortOrder), "keyName"),
+          noun: ["API key", "API keys"] as [string, string],
+          groups: groupDataByKey(toItems(stats.by_api_key), "keyName"),
           storageKey: "usage-stats:expanded-apikeys",
           emptyMessage: "No API key usage recorded yet.",
-          renderSummaryCells: (g: Group<Item>) => (
-            <>
-              {dash}
-              {dash}
-              {counts(g.summary.requests, g.summary.lastUsed)}
-            </>
-          ),
-          renderDetailCells: (item: Item) => (
-            <>
-              <td className="px-6 py-3 font-mono text-xs font-medium">{item.keyPrefix ? `${item.keyPrefix}…` : item.keyName}</td>
-              <td className="px-6 py-3">{item.rawModel}</td>
-              <td className="px-6 py-3">{badge(item.provider)}</td>
-              {counts(item.requests, item.lastUsed)}
-            </>
-          ),
+          detail: (i: Item) => ({ primary: i.rawModel, secondary: i.provider }),
+          searchText: (i: Item) => `${model(i)} ${i.keyName ?? ""} ${i.keyPrefix ?? ""}`,
+        };
+      case "user":
+        // Every usage row lands in by_api_key with its owner's email, so grouping it by email covers all usage.
+        return {
+          noun: ["user", "users"] as [string, string],
+          groups: groupDataByKey(toItems(stats.by_api_key), "userEmail"),
+          storageKey: "usage-stats:expanded-users",
+          emptyMessage: "No usage recorded yet.",
+          detail: (i: Item) => ({
+            primary: (
+              <>
+                <span className="font-medium">{i.keyName}</span>
+                {i.keyPrefix && <span className="ms-2 font-mono text-xs text-muted-foreground">{i.keyPrefix.slice(0, 12)}…</span>}
+              </>
+            ),
+            secondary: model(i),
+          }),
+          searchText: (i: Item) => `${model(i)} ${i.keyName ?? ""} ${i.userEmail ?? ""}`,
         };
       case "endpoint":
         return {
-          columns: ENDPOINT_COLUMNS,
-          groupedData: groupDataByKey(sortData(toItems(stats.by_endpoint), sortBy, sortOrder), "endpoint"),
+          noun: ["endpoint", "endpoints"] as [string, string],
+          groups: groupDataByKey(toItems(stats.by_endpoint), "endpoint"),
           storageKey: "usage-stats:expanded-endpoints",
           emptyMessage: "No endpoint usage recorded yet.",
-          renderSummaryCells: (g: Group<Item>) => (
-            <>
-              {dash}
-              {dash}
-              {counts(g.summary.requests, g.summary.lastUsed)}
-            </>
-          ),
-          renderDetailCells: (item: Item) => (
-            <>
-              <td className="px-6 py-3 font-mono text-sm font-medium">{item.endpoint}</td>
-              <td className="px-6 py-3">{item.rawModel}</td>
-              <td className="px-6 py-3">{badge(item.provider)}</td>
-              {counts(item.requests, item.lastUsed)}
-            </>
-          ),
+          detail: (i: Item) => ({ primary: i.rawModel, secondary: i.provider }),
+          searchText: (i: Item) => `${model(i)} ${i.endpoint ?? ""}`,
         };
     }
-  }, [stats, tableView, sortBy, sortOrder]);
+  }, [stats, tableView]);
 
   if (!stats && !loading) return <div className="text-muted-foreground">Failed to load usage statistics.</div>;
 
-  const spinner = (
-    <div className="flex items-center justify-center py-12 text-muted-foreground">
-      <Loader2 className="size-8 animate-spin" aria-label="Loading" />
-    </div>
-  );
+  if (loading || !stats || !active) {
+    return (
+      <div className="flex min-w-0 flex-col gap-4" aria-busy>
+        <span className="sr-only">Loading usage</span>
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+          {Array.from({ length: 5 }, (_, i) => (
+            <Skeleton key={i} className="h-[118px] rounded-[14px]" />
+          ))}
+        </div>
+        <Skeleton className="h-[320px] rounded-[14px]" />
+        <Skeleton className="h-[340px] rounded-[14px]" />
+      </div>
+    );
+  }
 
   return (
-    <div className="flex min-w-0 flex-col gap-6" aria-busy={fetching}>
-      {/* Overview cards */}
-      {loading || !stats ? spinner : <OverviewCards stats={stats} />}
+    <ReducedMotionConfig>
+      <div className="flex min-w-0 flex-col gap-4" aria-busy={fetching}>
+        <OverviewCards stats={stats} />
 
-      {/* Provider topology + Recent Requests */}
-      {loading || !stats ? (
-        spinner
-      ) : (
-        <div className="grid min-w-0 grid-cols-1 items-stretch gap-2 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
+        <Reveal index={5}>
+          <UsageChart chart={stats.chart} granularity={stats.granularity} />
+        </Reveal>
+
+        <Reveal index={6} className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-2">
+          <ProviderBarChart byProvider={stats.by_provider} />
+          <TopModelsChart byModel={stats.by_model} />
+        </Reveal>
+
+        <Reveal index={7} className="grid min-w-0 grid-cols-1 items-stretch gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(300px,1fr)]">
           <ProviderTopology
             providers={stats.providers}
             activeCount={stats.active_count}
@@ -416,65 +341,26 @@ export function UsageStats({ scope, period }: { scope: Scope; period: Period }) 
             errorProvider={stats.error_provider}
           />
           <RecentRequests requests={stats.recent_requests} />
-        </div>
-      )}
+        </Reveal>
 
-      {/* Token / Cost chart - sync period */}
-      {loading || !stats ? spinner : <UsageChart chart={stats.chart} granularity={stats.granularity} />}
-
-      {/* Provider and model breakdown charts */}
-      {stats && (
-        <div className="grid min-w-0 grid-cols-1 gap-2 lg:grid-cols-2">
-          <ProviderBarChart byProvider={stats.by_provider} />
-          <TopModelsChart byModel={stats.by_model} />
-        </div>
-      )}
-
-      {/* Table with dropdown selector */}
-      <div className="flex flex-col gap-3">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <select
-            aria-label="Table"
-            value={tableView}
-            onChange={(e) => setTableView(e.target.value as TableView)}
-            className="w-full rounded-lg border bg-card px-3 py-1.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-ring/50 sm:w-auto"
-          >
-            {TABLE_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-          <Segmented
-            label="Table values"
-            options={[
-              { value: "costs", label: "Costs" },
-              { value: "tokens", label: "Tokens" },
-            ]}
-            value={viewMode}
-            onChange={setViewMode}
-            className="grid-cols-2"
-          />
-        </div>
-        {loading || !active ? (
-          spinner
-        ) : (
-          <UsageTable
+        <Reveal index={8}>
+          <UsageBreakdown
             key={active.storageKey}
-            title=""
-            columns={active.columns}
-            groupedData={active.groupedData}
-            sortBy={sortBy}
-            sortOrder={sortOrder}
-            onToggleSort={toggleSort}
-            viewMode={viewMode}
+            noun={active.noun}
+            groups={active.groups}
+            detail={active.detail}
+            searchText={active.searchText}
+            groupDecor={active.groupDecor}
             storageKey={active.storageKey}
-            renderSummaryCells={active.renderSummaryCells}
-            renderDetailCells={active.renderDetailCells}
             emptyMessage={active.emptyMessage}
+            viewMode={viewMode}
+            onViewMode={setViewMode}
+            groupBy={
+              <Segmented label="Group the table by" options={tableOptions(byUser)} value={tableView} onChange={setTableView} className="w-full sm:w-auto" />
+            }
           />
-        )}
+        </Reveal>
       </div>
-    </div>
+    </ReducedMotionConfig>
   );
 }

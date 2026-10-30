@@ -21,11 +21,16 @@ const usdSmall = new Intl.NumberFormat("en-US", {
   minimumFractionDigits: 2,
   maximumFractionDigits: 4,
 });
-const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
+const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const usdWhole = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 
-/** "$0.0731" below one dollar (cost of a single request), "$14.20" above. */
+/**
+ * "$0.0731" below one dollar (cost of a single request), "$14.20" above, and
+ * whole amounts without cents: "$10,000", not "$10,000.00".
+ */
 export function formatUsd(value: number): string {
   if (value !== 0 && Math.abs(value) < 1) return usdSmall.format(value);
+  if (Math.round(value * 100) % 100 === 0) return usdWhole.format(value);
   return usd.format(value);
 }
 

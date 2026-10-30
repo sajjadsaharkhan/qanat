@@ -1,3 +1,8 @@
+"use client";
+
+import { spring, useShouldReduceMotion, useTempoTransition } from "@animate-ui/react/utils/motion";
+import { motion } from "motion/react";
+
 import { quotaLevel, type QuotaLevel } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -9,10 +14,29 @@ const fill: Record<QuotaLevel, string> = {
   exhausted: "bg-destructive",
 };
 
-/** A quota usage bar. The label names the window so status isn't color-only. */
-export function QuotaBar({ used, limit, label, className }: { used: number; limit: number; label: string; className?: string }) {
+/**
+ * A quota usage bar. The label names the window so status isn't color-only.
+ * The fill grows in once and glides to new values; it moves by translateX so
+ * its rounded end never stretches.
+ */
+export function QuotaBar({
+  used,
+  limit,
+  label,
+  size = "sm",
+  className,
+}: {
+  used: number;
+  limit: number;
+  label: string;
+  size?: "sm" | "md";
+  className?: string;
+}) {
+  const reduce = useShouldReduceMotion();
+  const glide = useTempoTransition(spring.progress);
   const level = quotaLevel(used, limit);
   const pct = limit > 0 ? Math.min(100, (used / limit) * 100) : 100;
+  const offset = `${pct - 100}%`;
   return (
     <div
       role="progressbar"
@@ -20,11 +44,13 @@ export function QuotaBar({ used, limit, label, className }: { used: number; limi
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={Math.round(pct)}
-      className={cn("h-1.5 w-full overflow-hidden rounded-full bg-muted", className)}
+      className={cn("w-full overflow-hidden rounded-full bg-muted", size === "md" ? "h-2.5" : "h-1.5", className)}
     >
-      <div
-        className={cn("h-full rounded-full transition-[width] duration-[450ms] ease-[cubic-bezier(0.2,0.8,0.2,1)]", fill[level])}
-        style={{ width: `${pct}%` }}
+      <motion.div
+        className={cn("h-full w-full rounded-full transition-colors duration-200", fill[level])}
+        initial={{ x: reduce ? offset : "-100%" }}
+        animate={{ x: offset }}
+        transition={glide}
       />
     </div>
   );
