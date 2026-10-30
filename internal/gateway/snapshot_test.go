@@ -67,7 +67,7 @@ func TestModelNames_FilteredByPlanAndKey(t *testing.T) {
 	s := testSnapshot()
 	all := s.ModelNames(&Plan{}, &Key{})
 	slices.Sort(all)
-	if want := []string{"claude-opus-4-7", "claude-sonnet-4-6", "claude-unrouted", "smart", "sonnet"}; !slices.Equal(all, want) {
+	if want := []string{"smart", "sonnet"}; !slices.Equal(all, want) {
 		t.Fatalf("all: %v", all)
 	}
 	plan := &Plan{Models: set([]string{"sonnet", "smart"})}

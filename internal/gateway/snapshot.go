@@ -211,11 +211,10 @@ func (s *Snapshot) ModelNames(p *Plan, k *Key) []string {
 		add(c.Name)
 	}
 	for m := range s.prices {
-		if _, ok := s.Resolve(m); ok {
-			add(m)
-		}
 		// Prefixed names for each provider with a usable account that serves
 		// the model's family, as 9router lists "cc/…" and "cx/…" (REQ-MAP-04).
+		// Priced models are never advertised bare — bare names are reserved
+		// for what an admin configured in the mapping (exact rules below).
 		for _, pv := range provider.All {
 			if s.serves(pv.ID) && pv.Serves(m) {
 				add(pv.Prefix + "/" + m)
