@@ -122,7 +122,7 @@ function UserMenu({ me }: { me: Me }) {
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="sm" aria-label="Account menu" className="gap-2">
-          <span aria-hidden className="grid size-6 place-items-center rounded-full bg-primary text-meta font-semibold text-primary-foreground">
+          <span aria-hidden className="grid size-6 place-items-center rounded-full bg-sand text-meta font-semibold text-sand-foreground">
             {initials}
           </span>
           <span className="hidden sm:inline">{me.name || me.username || me.email}</span>

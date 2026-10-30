@@ -64,7 +64,7 @@ export default function UsersPage() {
                     <TableCell>
                       <div className="flex items-center gap-2 font-semibold">
                         {who}
-                        {isRoot && <Tag tone="brand">Root</Tag>}
+                        {isRoot && <Tag tone="sand">Root</Tag>}
                         {u.disabled_at && <Tag>Disabled</Tag>}
                       </div>
                       <div className="text-meta text-muted-foreground">{u.email}</div>

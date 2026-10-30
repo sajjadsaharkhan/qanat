@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { QanatMark } from "@/components/qanat/qanat-mark";
 import { cn } from "@/lib/utils";
 
-/** A turquoise-tinted tile holding a page's icon (design.md §3.2). */
+/** A sage-tinted tile holding a page's icon (design.md §3.1a). */
 export function IconTile({ icon: Icon, className }: { icon: LucideIcon; className?: string }) {
   return (
     <span aria-hidden className={cn("grid size-10 shrink-0 place-items-center rounded-lg bg-brand-soft text-brand-text", className)}>
@@ -65,13 +65,13 @@ export function EmptyState({ title, children, action }: { title: string; childre
   );
 }
 
-/** A pill in brand turquoise (for "Default", "Root", "Active") or neutral. */
-export function Tag({ children, tone = "neutral" }: { children: ReactNode; tone?: "brand" | "neutral" }) {
+/** A pill: brand (sage/forest), sand (warm accent) or neutral. */
+export function Tag({ children, tone = "neutral" }: { children: ReactNode; tone?: "brand" | "sand" | "neutral" }) {
   return (
     <span
       className={cn(
         "inline-flex items-center rounded-full px-2 py-0.5 text-meta font-medium whitespace-nowrap",
-        tone === "brand" ? "bg-brand-soft text-brand-text" : "bg-muted text-muted-foreground",
+        tone === "brand" ? "bg-brand-soft text-brand-text" : tone === "sand" ? "bg-sand-soft text-sand-text" : "bg-muted text-muted-foreground",
       )}
     >
       {children}

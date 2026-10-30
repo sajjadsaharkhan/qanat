@@ -10,7 +10,8 @@ const y = (x: number) => 62 + (x - 8) * 0.12;
 /**
  * A cross-section of a qanat: access shafts down to a sloped channel.
  * Shafts are ink (currentColor); the water — channel, outlet and droplet — is
- * turquoise, unless a state paints it amber or red (design.md §2).
+ * the primary color (forest; sage in dark), unless a state paints it amber or
+ * red (design.md §2).
  */
 export function QanatMark({
   state = "still",

@@ -1,8 +1,8 @@
 # Qanat — Design System
 
-> **Quiet channel, clear signal.** A healthy qanat is silent: water moves underground and nobody thinks about it. The dashboard should feel the same: calm, with one color of its own, the turquoise of water and Persian tilework. When something needs a person, exactly one thing says so.
+> **Quiet channel, clear signal.** A healthy qanat is silent: water moves underground and nobody thinks about it. The dashboard should feel the same: calm and warm: forest and sage like a well-kept garden by the water, on warm paper, with a touch of sand. When something needs a person, exactly one thing says so.
 
-This document is the source of truth for the dashboard (`web/`). The look and feel starts from [Tower](https://github.com/ghhrmnzdh/tower) ([its design system](https://github.com/ghhrmnzdh/tower/blob/main/docs/DESIGN.md)): Apple-grade restraint, amber and red reserved for real state, motion only when state changes. Unlike Tower, Qanat has a brand color: **firoozeh** (Persian turquoise), added 2026-10-30 at the owner's request so the dashboard has color and character. It is built with **shadcn/ui** on Tailwind v4 and supports **light and dark** themes from day one.
+This document is the source of truth for the dashboard (`web/`). The look and feel starts from [Tower](https://github.com/ghhrmnzdh/tower) ([its design system](https://github.com/ghhrmnzdh/tower/blob/main/docs/DESIGN.md)): Apple-grade restraint, amber and red reserved for real state, motion only when state changes. Unlike Tower, Qanat has its own palette, chosen by the owner on 2026-10-30 for color and character: near-black `#0C0A08`, forest `#2A3723`, sage `#B9BBA8`, off-white `#E8E5DD` and sand `#DCBC98`. It is built with **shadcn/ui** on Tailwind v4 and supports **light and dark** themes from day one.
 
 Requirement IDs (`REQ-…`) refer to [docs/prd.md](docs/prd.md).
 
@@ -13,7 +13,7 @@ Requirement IDs (`REQ-…`) refer to [docs/prd.md](docs/prd.md).
 Every component decision traces back to one of these four rules. In review, a design choice that can't name its rule is cut.
 
 1. **The mark is the state.** Status is carried by the Qanat mark and by status symbols, never by decoration. Nothing is colored "to look nice".
-2. **Turquoise is the interactive color.** Buttons, selections, focus rings, links, healthy quota bars and charts use firoozeh. Text stays ink. Turquoise never means a warning or an error.
+2. **Forest is the interactive color** (sage in dark mode, where forest is too dark to see). Buttons, selections, focus rings, links, healthy quota bars and charts use it. **Sand is decoration only** (hero band, avatar, the root pill, the sign-in pattern) and never carries state.
 3. **One loudest thing.** Amber means *held, will clear on its own or soon needs attention*. Red means *broken or exhausted, needs a person*. At most one element on screen pulses at a time.
 4. **Motion = state change.** Nothing loops when all is well. Motion answers a person's action, or announces a state change once.
 
@@ -30,8 +30,8 @@ The one memorable element of the product. A cross-section of a qanat: a sloped u
 
 | State | Look | Means | Who sees it |
 |---|---|---|---|
-| `flowing` | turquoise channel; a droplet travels the channel, one per active stream (max 3) | streams are in flight | everyone |
-| `still` | turquoise channel, no droplets, no motion | healthy and idle | everyone |
+| `flowing` | primary-colored channel; a droplet travels the channel, one per active stream (max 3) | streams are in flight | everyone |
+| `still` | primary-colored channel, no droplets, no motion | healthy and idle | everyone |
 | `held` | amber channel segment at one shaft; droplets pause there | a hold: quota ≥ 95% (user), or an account/proxy in cooldown or pool headroom low (admin) | user / admin |
 | `broken` | red gap in the channel, hollow outlet | quota exhausted (user), or an account disconnected / pool exhausted (admin) | user / admin |
 
@@ -39,7 +39,7 @@ Rules:
 
 - The mark animates only in `flowing` and only on open surfaces (not the favicon). Under `prefers-reduced-motion` it freezes on a legible still frame for each state.
 - Geometry: drawn in a `0…100` box as one SVG component (`<QanatMark state=… />`). Stroke width 6 at 24 px, scaled with the box. No fills except the outlet dot.
-- Shafts are ink (`currentColor`); the water (channel, outlet, droplet) is turquoise unless a state paints it amber or red. On the deep brand panel (sign-in) the whole mark is drawn in the panel's foreground (`water={false}`).
+- Shafts are ink (`currentColor`); the water (channel, outlet, droplet) is the primary color (forest; sage in dark) unless a state paints it amber or red. On the deep brand panel (sign-in) the whole mark is drawn in the panel's foreground (`water={false}`).
 
 ---
 
@@ -51,40 +51,39 @@ All colors are CSS variables in `web/src/app/globals.css`. **Components never us
 
 | Token | Light | Dark | Role |
 |---|---|---|---|
-| `--background` | `#FFFFFF` | `#1C1C1E` | page |
-| `--foreground` | `#1D1D1F` | `#F5F5F7` | primary text |
-| `--card` / `--popover` | `#FFFFFF` | `#232325` | raised surfaces |
-| `--primary` (firoozeh) | `#0F766E` | `#3CC4BB` | buttons, active nav, focus, healthy bars, charts |
-| `--primary-foreground` | `#FFFFFF` | `#0F1F1E` | text on turquoise |
-| `--secondary` / `--muted` | `#F2F2F4` | `#2C2C2E` | quiet fills, hover rows |
-| `--muted-foreground` | `#66666B` | `#A1A1A6` | secondary text (≥ 4.8:1 on every surface, incl. selected rows) |
-| `--accent` / `--accent-foreground` | `#E3F3F1` / `#0F766E` | `#173331` / `#5CCFC6` | selected row, hover (turquoise tint) |
-| `--border` / `--input` | `#E3E3E6` | `#3A3A3C` | dividers, inputs |
-| `--ring` | `#0F766E` | `#3CC4BB` | focus ring (turquoise, 2 px, 2 px offset) |
-| `--sidebar` | `#F2F8F7` | `#172122` | sidebar surface, faintly turquoise |
-| `--sidebar-accent` / `-foreground` | `#DCEFEC` / `#0D5F59` | `#1D3A38` / `#7FDCD4` | active nav item |
+| `--background` | `#F6F4EF` (warm paper) | `#0C0A08` | page |
+| `--foreground` | `#0C0A08` | `#E8E5DD` | primary text |
+| `--card` / `--popover` | `#FCFBF8` | `#15130F` | raised surfaces |
+| `--primary` | `#2A3723` (forest) | `#B9BBA8` (sage) | buttons, active nav, focus, healthy bars, charts |
+| `--primary-foreground` | `#F6F4EF` | `#0C0A08` | text on primary |
+| `--secondary` / `--muted` | `#ECEAE2` | `#1F1C17` | quiet fills, hover rows, bar track |
+| `--muted-foreground` | `#5E5C52` | `#B9BBA8` | secondary text (≥ 4.5:1 on every surface) |
+| `--accent` / `--accent-foreground` | `#DFE0D3` / `#2A3723` | `#2A3723` / `#E8E5DD` | selected row, hover |
+| `--border` / `--input` | `#DCD9CF` / `#D2CFC4` | `#2E2B24` / `#36322A` | dividers, inputs |
+| `--ring` | `#2A3723` | `#B9BBA8` | focus ring (2 px, 2 px offset) |
+| `--sidebar` | `#E8E5DD` | `#12100D` | sidebar surface |
+| `--sidebar-accent` / `-foreground` | `#D6D8C8` / `#2A3723` | `#2A3723` / `#E8E5DD` | active nav item |
 
-The neutrals are Apple's system grays, matching Tower's native macOS feel; the sidebar and accents carry a trace of turquoise.
-
-### 3.1a Brand (firoozeh)
+### 3.1a Brand accents
 
 | Token | Light | Dark | Role |
 |---|---|---|---|
-| `--brand-soft` | `#E3F3F1` | `#173331` | icon tiles beside page titles, the Overview hero band, brand pills ("Default", "Root", "Active") |
-| `--brand-text` | `#0F766E` | `#5CCFC6` | turquoise text and icons on any surface (≥ 4.5:1) |
-| `--brand-deep` / `-foreground` | `#0D3B3E` / `#E9F7F5` | `#0B2A2C` / `#E9F7F5` | the sign-in brand panel, with a faint girih (eight-point star) pattern |
+| `--brand-soft` / `--brand-text` | `#E3E5D8` / `#2A3723` | `#232C1D` / `#C5C9B0` | icon tiles beside page titles, "Default" and "Active" pills |
+| `--brand-deep` / `-foreground` | `#2A3723` / `#E8E5DD` | `#1C2417` / `#E8E5DD` | the sign-in panel |
+| `--sand` / `--sand-foreground` | `#DCBC98` / `#0C0A08` | same | avatar, girih pattern on the sign-in panel |
+| `--sand-soft` / `--sand-text` | `#F3E6D6` / `#7A5530` | `#2A2118` / `#DCBC98` | Overview hero band, "Root" pill |
 
-Rules: one brand hue only. No gradients. The girih pattern appears only on the brand panel, at ≤ 12% opacity.
+Rules: no gradients; the girih pattern appears only on the sign-in panel, at ≤ 16% opacity; sand never signals state.
 
 ### 3.2 Signal colors (reserved)
 
-Signal colors have separate **fill** and **text** tokens, because the fill hues fail WCAG contrast as text. Fills meet the 3:1 non-text contrast rule against both the page and the quota-bar track; text tokens meet 4.5:1 on every surface. Tower's amber (`#E6A93C`) is kept in dark mode; in light mode it is deepened to `#BF7F0E`, because the original measures 2.1:1 on white.
+Signal colors have separate **fill** and **text** tokens, because the fill hues fail WCAG contrast as text. Fills meet the 3:1 non-text contrast rule against both the page and the quota-bar track; text tokens meet 4.5:1 on every surface. Tower's amber (`#E6A93C`) is kept in dark mode; in light mode it is deepened to `#B07206` so it holds 3:1 on the warm track.
 
 | Meaning | Fill token (bars, icons, dots) | Light | Dark | Text token | Light | Dark |
 |---|---|---|---|---|---|---|
-| Hold / warning | `--warning` | `#BF7F0E` | `#E6A93C` | `--warning-text` | `#8A5A00` | `#F0C26B` |
-| Danger / broken | `--destructive` | `#E5484D` | `#E5484D` | `--destructive-text` | `#C62A2F` | `#FF8589` |
-| On (switches only) | `--success` | `#30A46C` | `#3DB97B` | — | — | — |
+| Hold / warning | `--warning` | `#B07206` | `#E6A93C` | `--warning-text` | `#7F5300` | `#F0C26B` |
+| Danger / broken | `--destructive` | `#E5484D` | `#E5484D` | `--destructive-text` | `#B8282D` | `#FF8F92` |
+| On (switches only) | `--success` | `#4B7A3F` | `#6F9A5E` | — | — | — |
 
 - Amber and red appear **only** for the states in §5. Nothing else is tinted: info banners, tips, tags and charts below a warning line stay neutral.
 - Green appears **only** on switches that are on. A healthy account is not green, it is quiet.
@@ -106,9 +105,9 @@ Model names are resolved to a tier by prefix in one helper (`modelTier(name)`), 
 
 ### 3.4 Charts
 
-- Single series: turquoise (`--chart-1`).
+- Single series: primary (`--chart-1`).
 - Breakdown by model: tier accents (§3.3).
-- Any other breakdown (by key, token type): the turquoise ramp `--chart-1…5` (100/72/52/36/22% opacity).
+- Any other breakdown (by key, token type): the primary ramp `--chart-1…5` (100/72/52/36/22% opacity).
 - Quota charts draw the limit as a dashed `--muted-foreground` line. Bars above 80% of the limit switch to `--warning`, and above 95% to `--destructive`. This is the only place a chart turns amber or red.
 - No gradients, no 3D, no pie charts. Use stacked bars or a ranked list instead.
 
@@ -153,7 +152,7 @@ Done right means you can tell states apart **without color**, by symbol shape an
 
 | State | Fill | Icon | Motion | Where |
 |---|---|---|---|---|
-| Quota < 80% | turquoise | — | none | quota bar |
+| Quota < 80% | primary | — | none | quota bar |
 | Quota 80–95% | `warning` | — | none | quota bar + 80% warning row |
 | Quota ≥ 95% / exhausted | `destructive` | `octagon-x` when exhausted | one pulse on arrival | quota bar, mark `held` / `broken` |
 | Account `healthy` | — | none (quiet) | none | accounts list |
@@ -164,7 +163,7 @@ Done right means you can tell states apart **without color**, by symbol shape an
 | Request ok | — | none | none | recent requests |
 | Request `aborted` | `muted-foreground` | `circle-slash` | none | recent requests |
 | Request error | `destructive-text` | `circle-x` | none | recent requests |
-| Stream in flight | turquoise | the mark (`flowing`) | droplet travels | sidebar header |
+| Stream in flight | primary | the mark (`flowing`) | droplet travels | sidebar header |
 
 **Needs you** (admin overview) is a ranked queue, highest first:
 
@@ -272,7 +271,7 @@ Install components with the shadcn CLI only (`npx shadcn@latest add <name>`), so
 | Need | Component | Notes |
 |---|---|---|
 | App shell | `sidebar`, `breadcrumb`, `sheet` | sidebar variant `inset` off; flat |
-| Actions | `button` | variants used: `default` (turquoise), `outline`, `ghost`, `destructive` |
+| Actions | `button` | variants used: `default` (forest / sage), `outline`, `ghost`, `destructive` |
 | Lists, tables | `table` + TanStack Table (data-table pattern) | sticky header, right-aligned numbers, row = 40 px |
 | Quota bars | `progress` | wrapped as `<QuotaBar>` applying §5 thresholds |
 | Charts | `chart` (Recharts) | colors from tokens only (§3.4) |
@@ -280,9 +279,9 @@ Install components with the shadcn CLI only (`npx shadcn@latest add <name>`), so
 | Overlays | `dialog`, `alert-dialog`, `popover`, `dropdown-menu`, `tooltip` | `alert-dialog` for anything destructive or irreversible |
 | Feedback | `sonner` (toasts), `skeleton`, `alert` | one toast at a time, bottom-right; names the action ("Key revoked") |
 | Navigation | `tabs`, `command` (`⌘K` palette) | command palette lists pages and admin actions |
-| Status | `Tag` (qanat) | `brand` (turquoise tint) or `neutral`; signal states use the dot + icon from §5 |
+| Status | `Tag` (qanat) | `brand` (sage tint), `sand` or `neutral`; signal states use the dot + icon from §5 |
 
-Qanat-specific components in `src/components/qanat/`: `QanatMark`, `QuotaBar`, `PageHeader` (with a turquoise `IconTile`), `Tag`, `CopyField` (monospace, copy button), `EmptyState`; to come: `StatusDot`, `ModelName`, `Money`, `Tokens`, `Countdown`, `NeedsYouQueue`.
+Qanat-specific components in `src/components/qanat/`: `QanatMark`, `QuotaBar`, `PageHeader` (with a sage `IconTile`), `Tag`, `CopyField` (monospace, copy button), `EmptyState`; to come: `StatusDot`, `ModelName`, `Money`, `Tokens`, `Countdown`, `NeedsYouQueue`.
 
 ---
 

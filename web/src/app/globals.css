@@ -2,8 +2,10 @@
  * Qanat design tokens — the only file where color values live (design.md §3).
  * Contrast of every pairing below is enforced by src/lib/contrast.test.ts.
  *
- * Brand: firoozeh (Persian turquoise), the color of water in the channel. It is
- * the interactive color; amber and red stay reserved for state (design.md §3).
+ * Palette (owner's choice, 2026-10-30): near-black #0c0a08, forest #2a3723,
+ * sage #b9bba8, off-white #e8e5dd, sand #dcbc98. Forest (sage in dark) is the
+ * interactive color; sand is a warm decorative accent; amber and red stay
+ * reserved for state (design.md §3).
  */
 @import "tailwindcss";
 @import "tw-animate-css";
@@ -13,34 +15,38 @@
 :root {
   --radius: 10px;
 
-  --background: #ffffff;
-  --foreground: #1d1d1f;
-  --card: #ffffff;
-  --card-foreground: #1d1d1f;
-  --popover: #ffffff;
-  --popover-foreground: #1d1d1f;
-  --primary: #0f766e;
-  --primary-foreground: #ffffff;
-  --secondary: #f2f2f4;
-  --secondary-foreground: #1d1d1f;
-  --muted: #f2f2f4;
-  --muted-foreground: #66666b;
-  --accent: #e3f3f1;
-  --accent-foreground: #0f766e;
-  --border: #e3e3e6;
-  --input: #e3e3e6;
-  --ring: #0f766e;
+  --background: #f6f4ef;
+  --foreground: #0c0a08;
+  --card: #fcfbf8;
+  --card-foreground: #0c0a08;
+  --popover: #fcfbf8;
+  --popover-foreground: #0c0a08;
+  --primary: #2a3723;
+  --primary-foreground: #f6f4ef;
+  --secondary: #eceae2;
+  --secondary-foreground: #0c0a08;
+  --muted: #eceae2;
+  --muted-foreground: #5e5c52;
+  --accent: #dfe0d3;
+  --accent-foreground: #2a3723;
+  --border: #dcd9cf;
+  --input: #d2cfc4;
+  --ring: #2a3723;
 
-  --brand-soft: #e3f3f1;
-  --brand-text: #0f766e;
-  --brand-deep: #0d3b3e;
-  --brand-deep-foreground: #e9f7f5;
+  --brand-soft: #e3e5d8;
+  --brand-text: #2a3723;
+  --brand-deep: #2a3723;
+  --brand-deep-foreground: #e8e5dd;
+  --sand: #dcbc98;
+  --sand-foreground: #0c0a08;
+  --sand-soft: #f3e6d6;
+  --sand-text: #7a5530;
 
-  --warning: #bf7f0e;
-  --warning-text: #8a5a00;
+  --warning: #b07206;
+  --warning-text: #7f5300;
   --destructive: #e5484d;
-  --destructive-text: #c62a2f;
-  --success: #30a46c;
+  --destructive-text: #b8282d;
+  --success: #4b7a3f;
 
   --model-fable: #c9a227;
   --model-opus: #b0343c;
@@ -49,20 +55,20 @@
   --model-gpt: #5e6ad2;
   --model-gemini: #2f9e8f;
 
-  --chart-1: rgb(15 118 110 / 1);
-  --chart-2: rgb(15 118 110 / 0.72);
-  --chart-3: rgb(15 118 110 / 0.52);
-  --chart-4: rgb(15 118 110 / 0.36);
-  --chart-5: rgb(15 118 110 / 0.22);
+  --chart-1: rgb(42 55 35 / 1);
+  --chart-2: rgb(42 55 35 / 0.72);
+  --chart-3: rgb(42 55 35 / 0.52);
+  --chart-4: rgb(42 55 35 / 0.36);
+  --chart-5: rgb(42 55 35 / 0.22);
 
-  --sidebar: #f2f8f7;
-  --sidebar-foreground: #1d1d1f;
-  --sidebar-primary: #0f766e;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #dcefec;
-  --sidebar-accent-foreground: #0d5f59;
-  --sidebar-border: #dde9e7;
-  --sidebar-ring: #0f766e;
+  --sidebar: #e8e5dd;
+  --sidebar-foreground: #0c0a08;
+  --sidebar-primary: #2a3723;
+  --sidebar-primary-foreground: #e8e5dd;
+  --sidebar-accent: #d6d8c8;
+  --sidebar-accent-foreground: #2a3723;
+  --sidebar-border: #d6d3c8;
+  --sidebar-ring: #2a3723;
 
   --shadow-overlay: 0 8px 28px rgb(0 0 0 / 0.12), 0 0 0 1px rgb(0 0 0 / 0.04);
 
@@ -76,49 +82,53 @@
 }
 
 .dark {
-  --background: #1c1c1e;
-  --foreground: #f5f5f7;
-  --card: #232325;
-  --card-foreground: #f5f5f7;
-  --popover: #232325;
-  --popover-foreground: #f5f5f7;
-  --primary: #3cc4bb;
-  --primary-foreground: #0f1f1e;
-  --secondary: #2c2c2e;
-  --secondary-foreground: #f5f5f7;
-  --muted: #2c2c2e;
-  --muted-foreground: #a1a1a6;
-  --accent: #173331;
-  --accent-foreground: #5ccfc6;
-  --border: #3a3a3c;
-  --input: #3a3a3c;
-  --ring: #3cc4bb;
+  --background: #0c0a08;
+  --foreground: #e8e5dd;
+  --card: #15130f;
+  --card-foreground: #e8e5dd;
+  --popover: #15130f;
+  --popover-foreground: #e8e5dd;
+  --primary: #b9bba8;
+  --primary-foreground: #0c0a08;
+  --secondary: #1f1c17;
+  --secondary-foreground: #e8e5dd;
+  --muted: #1f1c17;
+  --muted-foreground: #b9bba8;
+  --accent: #2a3723;
+  --accent-foreground: #e8e5dd;
+  --border: #2e2b24;
+  --input: #36322a;
+  --ring: #b9bba8;
 
-  --brand-soft: #173331;
-  --brand-text: #5ccfc6;
-  --brand-deep: #0b2a2c;
-  --brand-deep-foreground: #e9f7f5;
+  --brand-soft: #232c1d;
+  --brand-text: #c5c9b0;
+  --brand-deep: #1c2417;
+  --brand-deep-foreground: #e8e5dd;
+  --sand: #dcbc98;
+  --sand-foreground: #0c0a08;
+  --sand-soft: #2a2118;
+  --sand-text: #dcbc98;
 
   --warning: #e6a93c;
   --warning-text: #f0c26b;
   --destructive: #e5484d;
-  --destructive-text: #ff8589;
-  --success: #3db97b;
+  --destructive-text: #ff8f92;
+  --success: #6f9a5e;
 
-  --chart-1: rgb(60 196 187 / 1);
-  --chart-2: rgb(60 196 187 / 0.72);
-  --chart-3: rgb(60 196 187 / 0.52);
-  --chart-4: rgb(60 196 187 / 0.36);
-  --chart-5: rgb(60 196 187 / 0.22);
+  --chart-1: rgb(185 187 168 / 1);
+  --chart-2: rgb(185 187 168 / 0.72);
+  --chart-3: rgb(185 187 168 / 0.52);
+  --chart-4: rgb(185 187 168 / 0.36);
+  --chart-5: rgb(185 187 168 / 0.22);
 
-  --sidebar: #172122;
-  --sidebar-foreground: #f5f5f7;
-  --sidebar-primary: #3cc4bb;
-  --sidebar-primary-foreground: #0f1f1e;
-  --sidebar-accent: #1d3a38;
-  --sidebar-accent-foreground: #7fdcd4;
-  --sidebar-border: #2a3a3b;
-  --sidebar-ring: #3cc4bb;
+  --sidebar: #12100d;
+  --sidebar-foreground: #e8e5dd;
+  --sidebar-primary: #b9bba8;
+  --sidebar-primary-foreground: #0c0a08;
+  --sidebar-accent: #2a3723;
+  --sidebar-accent-foreground: #e8e5dd;
+  --sidebar-border: #26231d;
+  --sidebar-ring: #b9bba8;
 
   --shadow-overlay: 0 8px 28px rgb(0 0 0 / 0.5), 0 0 0 1px rgb(255 255 255 / 0.06);
 }
@@ -170,6 +180,10 @@
   --color-brand-text: var(--brand-text);
   --color-brand-deep: var(--brand-deep);
   --color-brand-deep-foreground: var(--brand-deep-foreground);
+  --color-sand: var(--sand);
+  --color-sand-foreground: var(--sand-foreground);
+  --color-sand-soft: var(--sand-soft);
+  --color-sand-text: var(--sand-text);
   --color-model-fable: var(--model-fable);
   --color-model-opus: var(--model-opus);
   --color-model-sonnet: var(--model-sonnet);

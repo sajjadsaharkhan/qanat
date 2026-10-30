@@ -77,7 +77,7 @@ export default function OverviewPage() {
         </EmptyState>
       ) : (
         <Card className="gap-0 overflow-hidden py-0 shadow-none" aria-live="polite">
-          <div className="border-b bg-brand-soft px-6 py-5">
+          <div className="border-b bg-sand-soft px-6 py-5">
             <Hero windows={windows} now={now} />
           </div>
           <CardContent className="py-5">

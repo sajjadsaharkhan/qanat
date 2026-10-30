@@ -69,7 +69,7 @@ function Form({ passwordEnabled }: { passwordEnabled: boolean }) {
  */
 function Girih() {
   return (
-    <svg aria-hidden className="absolute inset-0 size-full opacity-[0.12]">
+    <svg aria-hidden className="absolute inset-0 size-full text-sand opacity-[0.16]">
       <defs>
         <pattern id="girih" width="56" height="56" patternUnits="userSpaceOnUse">
           <g fill="none" stroke="currentColor" strokeWidth="1.2">
@@ -96,7 +96,9 @@ export function SignInForm({ passwordEnabled }: { passwordEnabled: boolean }) {
         </div>
         <div className="relative max-w-sm">
           <QanatMark className="mb-6 size-24" title="" water={false} />
-          <p className="text-[28px] font-semibold leading-9">Quiet channel, clear signal.</p>
+          <p className="text-[28px] font-semibold leading-9">
+            Quiet channel, <span className="text-sand">clear signal.</span>
+          </p>
           <p className="mt-3 opacity-80">One gateway for your team&apos;s Claude, Codex and Antigravity accounts, with fair quotas for everyone.</p>
         </div>
         <p className="relative text-meta opacity-70"><span lang="fa">قنات</span> · an underground channel that moves water without being seen</p>
