@@ -1,0 +1,35 @@
+# Type-safe queries (PRD §11.3). Regenerate with `make sqlc`; the output in
+# internal/store/db is committed so builds need no codegen step.
+version: "2"
+sql:
+  - engine: postgresql
+    schema: internal/store/migrations
+    queries: internal/store/queries
+    gen:
+      go:
+        package: db
+        out: internal/store/db
+        sql_package: pgx/v5
+        emit_empty_slices: true
+        overrides:
+          - db_type: uuid
+            go_type: string
+          - db_type: uuid
+            nullable: true
+            go_type: { type: string, pointer: true }
+          - db_type: pg_catalog.numeric
+            go_type: float64
+          - db_type: pg_catalog.numeric
+            nullable: true
+            go_type: { type: float64, pointer: true }
+          - db_type: timestamptz
+            go_type: time.Time
+          - db_type: timestamptz
+            nullable: true
+            go_type: { import: time, type: Time, pointer: true }
+          - db_type: text
+            nullable: true
+            go_type: { type: string, pointer: true }
+          - db_type: inet
+            nullable: true
+            go_type: { import: net/netip, type: Addr, pointer: true }

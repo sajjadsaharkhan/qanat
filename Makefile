@@ -7,10 +7,15 @@ INTEGRATION_ENV := QANAT_TEST_REDIS_ADDR=localhost:56379 \
 
 .PHONY: help test test-race test-reference test-integration test-acceptance bench \
         golden-update fixtures-check lint deps-up deps-down stack-up stack-down \
-        web-test web-e2e ci
+        web-test web-e2e ci sqlc
 
 help: ## List targets
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | awk -F':.*?## ' '{printf "  %-18s %s\n", $$1, $$2}'
+
+SQLC := docker run --rm -v "$(CURDIR)":/src -w /src sqlc/sqlc:1.31.1
+
+sqlc: ## Regenerate internal/store/db from SQL (commit the output)
+	$(SQLC) generate
 
 lint: ## gofmt + go vet
 	@test -z "$$(gofmt -l .)" || (gofmt -l . && echo "gofmt needed" && exit 1)
