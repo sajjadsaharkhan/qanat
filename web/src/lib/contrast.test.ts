@@ -45,8 +45,8 @@ function contrast(a: string, b: string): number {
   return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
 }
 
-const surfaces = ["background", "card", "muted", "accent", "sidebar"];
-const texts = ["foreground", "muted-foreground", "warning-text", "destructive-text"];
+const surfaces = ["background", "card", "muted", "accent", "sidebar", "brand-soft"];
+const texts = ["foreground", "muted-foreground", "warning-text", "destructive-text", "brand-text"];
 const fills = ["warning", "destructive", "primary"];
 
 for (const [theme, t] of [
@@ -60,8 +60,17 @@ for (const [theme, t] of [
           expect(contrast(token(t, text), token(t, surface))).toBeGreaterThanOrEqual(4.5);
         });
 
-    it("ink button text ≥ 4.5:1", () => {
+    it("button text on turquoise ≥ 4.5:1", () => {
       expect(contrast(token(t, "primary-foreground"), token(t, "primary"))).toBeGreaterThanOrEqual(4.5);
+    });
+
+    it("active nav item text ≥ 4.5:1", () => {
+      expect(contrast(token(t, "sidebar-accent-foreground"), token(t, "sidebar-accent"))).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(token(t, "sidebar-foreground"), token(t, "sidebar-accent"))).toBeGreaterThanOrEqual(4.5);
+    });
+
+    it("text on the deep brand panel ≥ 4.5:1", () => {
+      expect(contrast(token(t, "brand-deep-foreground"), token(t, "brand-deep"))).toBeGreaterThanOrEqual(4.5);
     });
 
     for (const fill of fills)

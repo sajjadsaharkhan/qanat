@@ -1,10 +1,10 @@
 "use client";
 
+import { Users } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { PageHeader } from "@/components/qanat/page";
-import { Badge } from "@/components/ui/badge";
+import { PageHeader, Tag } from "@/components/qanat/page";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -37,7 +37,7 @@ export default function UsersPage() {
   return (
     <>
       <PageHeader
-        title="Users"
+        title="Users" icon={Users}
         description="People are added on their first Keycloak sign-in, on the zero-quota default Plan. Assign a Plan to let them spend."
       />
       {users.isPending || plans.isPending ? (
@@ -64,8 +64,8 @@ export default function UsersPage() {
                     <TableCell>
                       <div className="flex items-center gap-2 font-semibold">
                         {who}
-                        {isRoot && <Badge variant="outline">Root</Badge>}
-                        {u.disabled_at && <Badge variant="outline">Disabled</Badge>}
+                        {isRoot && <Tag tone="brand">Root</Tag>}
+                        {u.disabled_at && <Tag>Disabled</Tag>}
                       </div>
                       <div className="text-meta text-muted-foreground">{u.email}</div>
                     </TableCell>

@@ -1,11 +1,11 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { Plus } from "lucide-react";
+import { Plus, Wallet } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
-import { PageHeader } from "@/components/qanat/page";
+import { PageHeader, Tag } from "@/components/qanat/page";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -16,7 +16,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -69,7 +68,7 @@ export default function PlansPage() {
   return (
     <>
       <PageHeader
-        title="Plans"
+        title="Plans" icon={Wallet}
         description="Each person is on one Plan: dollar quotas per window, rate limits and the models they may use."
         actions={
           <Button
@@ -105,7 +104,7 @@ export default function PlansPage() {
                   <TableCell>
                     <div className="flex items-center gap-2 font-semibold">
                       {p.name}
-                      {p.is_default && <Badge variant="outline">Default</Badge>}
+                      {p.is_default && <Tag tone="brand">Default</Tag>}
                     </div>
                     <div className="text-meta text-muted-foreground">
                       Resets {p.daily_anchor} {p.timezone} · {weekdays[p.weekly_anchor]} · day {p.monthly_anchor}

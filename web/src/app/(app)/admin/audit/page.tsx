@@ -1,5 +1,6 @@
 "use client";
 
+import { ScrollText } from "lucide-react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 
 import { EmptyState, PageHeader } from "@/components/qanat/page";
@@ -59,7 +60,7 @@ export default function AuditPage() {
 
   return (
     <>
-      <PageHeader title="Audit log" description="Every change to Plans, quotas, keys, roles, accounts, mapping and prices, newest first." />
+      <PageHeader title="Audit log" icon={ScrollText} description="Every change to Plans, quotas, keys, roles, accounts, mapping and prices, newest first." />
       {audit.isPending ? (
         <Skeleton className="h-40 w-full" />
       ) : rows.length === 0 ? (

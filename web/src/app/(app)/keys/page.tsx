@@ -1,11 +1,12 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { Plus } from "lucide-react";
+import { KeyRound, Plus } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { toast } from "sonner";
 
-import { CopyField, EmptyState, PageHeader } from "@/components/qanat/page";
+import { CopyField } from "@/components/qanat/copy-field";
+import { EmptyState, PageHeader, Tag } from "@/components/qanat/page";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -16,7 +17,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -142,7 +142,7 @@ export default function KeysPage() {
 
   return (
     <>
-      <PageHeader title="Keys" description="Personal API keys for Claude Code. Only a fingerprint is stored." actions={createButton} />
+      <PageHeader title="Keys" icon={KeyRound} description="Personal API keys for Claude Code. Only a fingerprint is stored." actions={createButton} />
 
       {keys.isPending ? (
         <Skeleton className="h-32 w-full" />
@@ -175,7 +175,7 @@ export default function KeysPage() {
                     <TableCell data-volatile>{k.last_used_at ? `${when(k.last_used_at)}${k.last_ip ? ` · ${k.last_ip}` : ""}` : "Never"}</TableCell>
                     <TableCell data-volatile>{when(k.expires_at, "Never")}</TableCell>
                     <TableCell>
-                      <Badge variant="outline">{status === "active" ? "Active" : status === "revoked" ? "Revoked" : "Expired"}</Badge>
+                      <Tag tone={status === "active" ? "brand" : "neutral"}>{status === "active" ? "Active" : status === "revoked" ? "Revoked" : "Expired"}</Tag>
                     </TableCell>
                     <TableCell className="text-end">
                       {status === "active" && (

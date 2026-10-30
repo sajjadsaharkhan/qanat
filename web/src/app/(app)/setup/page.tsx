@@ -1,8 +1,10 @@
 "use client";
 
+import { SquareTerminal } from "lucide-react";
 import Link from "next/link";
 
-import { CopyField, PageHeader, SectionHeader } from "@/components/qanat/page";
+import { CopyField } from "@/components/qanat/copy-field";
+import { PageHeader, SectionHeader } from "@/components/qanat/page";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api/client";
 import { settingsSnippet, testCommand } from "@/lib/snippet";
@@ -16,7 +18,7 @@ export default function SetupPage() {
   return (
     <>
       <PageHeader
-        title="Setup"
+        title="Setup" icon={SquareTerminal}
         description={
           <>
             Point Claude Code at Qanat with two settings. Replace {placeholder} with a key from{" "}

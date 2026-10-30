@@ -1,19 +1,38 @@
-"use client";
-
-import { Check, Copy } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import type { LucideIcon } from "lucide-react";
+import type { ReactNode } from "react";
 
 import { QanatMark } from "@/components/qanat/qanat-mark";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-/** Page title row: h1 plus optional actions (design.md §4.1, §7). */
-export function PageHeader({ title, description, actions }: { title: string; description?: ReactNode; actions?: ReactNode }) {
+/** A turquoise-tinted tile holding a page's icon (design.md §3.2). */
+export function IconTile({ icon: Icon, className }: { icon: LucideIcon; className?: string }) {
+  return (
+    <span aria-hidden className={cn("grid size-10 shrink-0 place-items-center rounded-lg bg-brand-soft text-brand-text", className)}>
+      <Icon className="size-5" />
+    </span>
+  );
+}
+
+/** Page title row: icon tile, h1 and optional actions (design.md §4.1, §7). */
+export function PageHeader({
+  title,
+  description,
+  actions,
+  icon,
+}: {
+  title: string;
+  description?: ReactNode;
+  actions?: ReactNode;
+  icon?: LucideIcon;
+}) {
   return (
     <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
-      <div className="min-w-0">
-        <h1 className="text-title font-semibold">{title}</h1>
-        {description && <p className="mt-1 max-w-[72ch] text-muted-foreground">{description}</p>}
+      <div className="flex min-w-0 items-start gap-3">
+        {icon && <IconTile icon={icon} />}
+        <div className="min-w-0">
+          <h1 className="text-title font-semibold">{title}</h1>
+          {description && <p className="mt-0.5 max-w-[72ch] text-muted-foreground">{description}</p>}
+        </div>
       </div>
       {actions && <div className="flex items-center gap-2">{actions}</div>}
     </div>
@@ -34,7 +53,9 @@ export function SectionHeader({ children, actions }: { children: ReactNode; acti
 export function EmptyState({ title, children, action }: { title: string; children?: ReactNode; action?: ReactNode }) {
   return (
     <div className="flex flex-col items-start gap-3 rounded-lg border border-dashed px-6 py-10">
-      <QanatMark className="size-8 text-muted-foreground" title="" />
+      <span className="grid size-12 place-items-center rounded-full bg-brand-soft">
+        <QanatMark className="size-7 text-muted-foreground" title="" />
+      </span>
       <div>
         <p className="font-semibold">{title}</p>
         {children && <div className="mt-1 max-w-[72ch] text-muted-foreground">{children}</div>}
@@ -44,26 +65,16 @@ export function EmptyState({ title, children, action }: { title: string; childre
   );
 }
 
-/** Monospace value with a copy button, for things copied verbatim (design.md §4). */
-export function CopyField({ value, label, multiline, className }: { value: string; label: string; multiline?: boolean; className?: string }) {
-  const [copied, setCopied] = useState(false);
-  const copy = async () => {
-    await navigator.clipboard.writeText(value);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
+/** A pill in brand turquoise (for "Default", "Root", "Active") or neutral. */
+export function Tag({ children, tone = "neutral" }: { children: ReactNode; tone?: "brand" | "neutral" }) {
   return (
-    <div className={cn("relative rounded-lg border bg-muted", className)}>
-      <pre
-        aria-label={label}
-        tabIndex={0}
-        className={cn("overflow-x-auto py-3 ps-3 pe-12 font-mono text-body", multiline ? "whitespace-pre" : "whitespace-nowrap")}
-      >
-        {value}
-      </pre>
-      <Button variant="ghost" size="icon" className="absolute end-1.5 top-1.5" onClick={copy} aria-label={copied ? "Copied" : `Copy ${label}`}>
-        {copied ? <Check /> : <Copy />}
-      </Button>
-    </div>
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full px-2 py-0.5 text-meta font-medium whitespace-nowrap",
+        tone === "brand" ? "bg-brand-soft text-brand-text" : "bg-muted text-muted-foreground",
+      )}
+    >
+      {children}
+    </span>
   );
 }

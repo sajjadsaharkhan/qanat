@@ -1,8 +1,8 @@
 # Qanat — Design System
 
-> **Quiet channel, clear signal.** A healthy qanat is silent: water moves underground and nobody thinks about it. The dashboard should feel the same. When everything is fine it is still and neutral. When something needs a person, exactly one thing says so.
+> **Quiet channel, clear signal.** A healthy qanat is silent: water moves underground and nobody thinks about it. The dashboard should feel the same: calm, with one color of its own, the turquoise of water and Persian tilework. When something needs a person, exactly one thing says so.
 
-This document is the source of truth for the dashboard (`web/`). The look and feel follows [Tower](https://github.com/ghhrmnzdh/tower) ([its design system](https://github.com/ghhrmnzdh/tower/blob/main/docs/DESIGN.md)): Apple-grade restraint, monochrome ink, amber and red reserved for real state, motion only when state changes. It is built with **shadcn/ui** on Tailwind v4 and supports **light and dark** themes from day one.
+This document is the source of truth for the dashboard (`web/`). The look and feel starts from [Tower](https://github.com/ghhrmnzdh/tower) ([its design system](https://github.com/ghhrmnzdh/tower/blob/main/docs/DESIGN.md)): Apple-grade restraint, amber and red reserved for real state, motion only when state changes. Unlike Tower, Qanat has a brand color: **firoozeh** (Persian turquoise), added 2026-10-30 at the owner's request so the dashboard has color and character. It is built with **shadcn/ui** on Tailwind v4 and supports **light and dark** themes from day one.
 
 Requirement IDs (`REQ-…`) refer to [docs/prd.md](docs/prd.md).
 
@@ -13,7 +13,7 @@ Requirement IDs (`REQ-…`) refer to [docs/prd.md](docs/prd.md).
 Every component decision traces back to one of these four rules. In review, a design choice that can't name its rule is cut.
 
 1. **The mark is the state.** Status is carried by the Qanat mark and by status symbols, never by decoration. Nothing is colored "to look nice".
-2. **Ink is the interactive color.** Buttons, selections, focus rings, links and charts use the ink (near-black in light, near-white in dark). There is no brand blue.
+2. **Turquoise is the interactive color.** Buttons, selections, focus rings, links, healthy quota bars and charts use firoozeh. Text stays ink. Turquoise never means a warning or an error.
 3. **One loudest thing.** Amber means *held, will clear on its own or soon needs attention*. Red means *broken or exhausted, needs a person*. At most one element on screen pulses at a time.
 4. **Motion = state change.** Nothing loops when all is well. Motion answers a person's action, or announces a state change once.
 
@@ -30,8 +30,8 @@ The one memorable element of the product. A cross-section of a qanat: a sloped u
 
 | State | Look | Means | Who sees it |
 |---|---|---|---|
-| `flowing` | ink channel; a soft droplet travels the channel, one per active stream (max 3) | streams are in flight | everyone |
-| `still` | ink channel, no droplets, no motion | healthy and idle | everyone |
+| `flowing` | turquoise channel; a droplet travels the channel, one per active stream (max 3) | streams are in flight | everyone |
+| `still` | turquoise channel, no droplets, no motion | healthy and idle | everyone |
 | `held` | amber channel segment at one shaft; droplets pause there | a hold: quota ≥ 95% (user), or an account/proxy in cooldown or pool headroom low (admin) | user / admin |
 | `broken` | red gap in the channel, hollow outlet | quota exhausted (user), or an account disconnected / pool exhausted (admin) | user / admin |
 
@@ -39,7 +39,7 @@ Rules:
 
 - The mark animates only in `flowing` and only on open surfaces (not the favicon). Under `prefers-reduced-motion` it freezes on a legible still frame for each state.
 - Geometry: drawn in a `0…100` box as one SVG component (`<QanatMark state=… />`). Stroke width 6 at 24 px, scaled with the box. No fills except the outlet dot.
-- The mark is never tinted for decoration, and never placed on a colored background.
+- Shafts are ink (`currentColor`); the water (channel, outlet, droplet) is turquoise unless a state paints it amber or red. On the deep brand panel (sign-in) the whole mark is drawn in the panel's foreground (`water={false}`).
 
 ---
 
@@ -54,16 +54,27 @@ All colors are CSS variables in `web/src/app/globals.css`. **Components never us
 | `--background` | `#FFFFFF` | `#1C1C1E` | page |
 | `--foreground` | `#1D1D1F` | `#F5F5F7` | primary text |
 | `--card` / `--popover` | `#FFFFFF` | `#232325` | raised surfaces |
-| `--primary` (ink) | `#1D1D1F` | `#F5F5F7` | buttons, selection, focus, charts |
-| `--primary-foreground` | `#FFFFFF` | `#1C1C1E` | text on ink |
+| `--primary` (firoozeh) | `#0F766E` | `#3CC4BB` | buttons, active nav, focus, healthy bars, charts |
+| `--primary-foreground` | `#FFFFFF` | `#0F1F1E` | text on turquoise |
 | `--secondary` / `--muted` | `#F2F2F4` | `#2C2C2E` | quiet fills, hover rows |
 | `--muted-foreground` | `#66666B` | `#A1A1A6` | secondary text (≥ 4.8:1 on every surface, incl. selected rows) |
-| `--accent` | `#EBEBEE` | `#323234` | selected row, active nav item |
+| `--accent` / `--accent-foreground` | `#E3F3F1` / `#0F766E` | `#173331` / `#5CCFC6` | selected row, hover (turquoise tint) |
 | `--border` / `--input` | `#E3E3E6` | `#3A3A3C` | dividers, inputs |
-| `--ring` | `#1D1D1F` | `#F5F5F7` | focus ring (ink, 2 px, 2 px offset) |
-| `--sidebar` | `#F7F7F8` | `#1F1F21` | sidebar surface |
+| `--ring` | `#0F766E` | `#3CC4BB` | focus ring (turquoise, 2 px, 2 px offset) |
+| `--sidebar` | `#F2F8F7` | `#172122` | sidebar surface, faintly turquoise |
+| `--sidebar-accent` / `-foreground` | `#DCEFEC` / `#0D5F59` | `#1D3A38` / `#7FDCD4` | active nav item |
 
-These are Apple's system neutrals, chosen on purpose to match Tower's native macOS feel.
+The neutrals are Apple's system grays, matching Tower's native macOS feel; the sidebar and accents carry a trace of turquoise.
+
+### 3.1a Brand (firoozeh)
+
+| Token | Light | Dark | Role |
+|---|---|---|---|
+| `--brand-soft` | `#E3F3F1` | `#173331` | icon tiles beside page titles, the Overview hero band, brand pills ("Default", "Root", "Active") |
+| `--brand-text` | `#0F766E` | `#5CCFC6` | turquoise text and icons on any surface (≥ 4.5:1) |
+| `--brand-deep` / `-foreground` | `#0D3B3E` / `#E9F7F5` | `#0B2A2C` / `#E9F7F5` | the sign-in brand panel, with a faint girih (eight-point star) pattern |
+
+Rules: one brand hue only. No gradients. The girih pattern appears only on the brand panel, at ≤ 12% opacity.
 
 ### 3.2 Signal colors (reserved)
 
@@ -95,9 +106,9 @@ Model names are resolved to a tier by prefix in one helper (`modelTier(name)`), 
 
 ### 3.4 Charts
 
-- Single series: ink (`--chart-1`).
+- Single series: turquoise (`--chart-1`).
 - Breakdown by model: tier accents (§3.3).
-- Any other breakdown (by key, token type): the ink ramp `--chart-1…5` (ink at 100/72/52/36/22% opacity).
+- Any other breakdown (by key, token type): the turquoise ramp `--chart-1…5` (100/72/52/36/22% opacity).
 - Quota charts draw the limit as a dashed `--muted-foreground` line. Bars above 80% of the limit switch to `--warning`, and above 95% to `--destructive`. This is the only place a chart turns amber or red.
 - No gradients, no 3D, no pie charts. Use stacked bars or a ranked list instead.
 
@@ -142,7 +153,7 @@ Done right means you can tell states apart **without color**, by symbol shape an
 
 | State | Fill | Icon | Motion | Where |
 |---|---|---|---|---|
-| Quota < 80% | ink | — | none | quota bar |
+| Quota < 80% | turquoise | — | none | quota bar |
 | Quota 80–95% | `warning` | — | none | quota bar + 80% warning row |
 | Quota ≥ 95% / exhausted | `destructive` | `octagon-x` when exhausted | one pulse on arrival | quota bar, mark `held` / `broken` |
 | Account `healthy` | — | none (quiet) | none | accounts list |
@@ -153,7 +164,7 @@ Done right means you can tell states apart **without color**, by symbol shape an
 | Request ok | — | none | none | recent requests |
 | Request `aborted` | `muted-foreground` | `circle-slash` | none | recent requests |
 | Request error | `destructive-text` | `circle-x` | none | recent requests |
-| Stream in flight | ink | the mark (`flowing`) | droplet travels | sidebar header |
+| Stream in flight | turquoise | the mark (`flowing`) | droplet travels | sidebar header |
 
 **Needs you** (admin overview) is a ranked queue, highest first:
 
@@ -261,7 +272,7 @@ Install components with the shadcn CLI only (`npx shadcn@latest add <name>`), so
 | Need | Component | Notes |
 |---|---|---|
 | App shell | `sidebar`, `breadcrumb`, `sheet` | sidebar variant `inset` off; flat |
-| Actions | `button` | variants used: `default` (ink), `outline`, `ghost`, `destructive`. No `secondary` on dark ink pages |
+| Actions | `button` | variants used: `default` (turquoise), `outline`, `ghost`, `destructive` |
 | Lists, tables | `table` + TanStack Table (data-table pattern) | sticky header, right-aligned numbers, row = 40 px |
 | Quota bars | `progress` | wrapped as `<QuotaBar>` applying §5 thresholds |
 | Charts | `chart` (Recharts) | colors from tokens only (§3.4) |
@@ -269,9 +280,9 @@ Install components with the shadcn CLI only (`npx shadcn@latest add <name>`), so
 | Overlays | `dialog`, `alert-dialog`, `popover`, `dropdown-menu`, `tooltip` | `alert-dialog` for anything destructive or irreversible |
 | Feedback | `sonner` (toasts), `skeleton`, `alert` | one toast at a time, bottom-right; names the action ("Key revoked") |
 | Navigation | `tabs`, `command` (`⌘K` palette) | command palette lists pages and admin actions |
-| Status | `badge` | neutral only; signal states use the dot + icon from §5 |
+| Status | `Tag` (qanat) | `brand` (turquoise tint) or `neutral`; signal states use the dot + icon from §5 |
 
-Qanat-specific components in `src/components/qanat/`: `QanatMark`, `QuotaBar`, `StatusDot`, `ModelName` (name + tier label), `Money`, `Tokens`, `Countdown`, `CopyField` (monospace, copy button), `NeedsYouQueue`, `EmptyState`.
+Qanat-specific components in `src/components/qanat/`: `QanatMark`, `QuotaBar`, `PageHeader` (with a turquoise `IconTile`), `Tag`, `CopyField` (monospace, copy button), `EmptyState`; to come: `StatusDot`, `ModelName`, `Money`, `Tokens`, `Countdown`, `NeedsYouQueue`.
 
 ---
 

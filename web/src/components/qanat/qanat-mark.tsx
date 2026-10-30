@@ -9,16 +9,30 @@ const y = (x: number) => 62 + (x - 8) * 0.12;
 
 /**
  * A cross-section of a qanat: access shafts down to a sloped channel.
- * Drawn in a 0…100 box with currentColor, so it follows the theme.
+ * Shafts are ink (currentColor); the water — channel, outlet and droplet — is
+ * turquoise, unless a state paints it amber or red (design.md §2).
  */
-export function QanatMark({ state = "still", className, title }: { state?: MarkState; className?: string; title?: string }) {
+export function QanatMark({
+  state = "still",
+  className,
+  title,
+  water = true,
+}: {
+  state?: MarkState;
+  className?: string;
+  title?: string;
+  /** false draws the whole mark in currentColor, e.g. on the deep brand panel. */
+  water?: boolean;
+}) {
   const label = title ?? `Qanat, ${state}`;
   return (
     <svg viewBox="0 0 100 100" role="img" aria-label={label} className={cn("size-6 shrink-0", className)}>
       <g fill="none" stroke="currentColor" strokeWidth={6} strokeLinecap="round">
         {shafts.map((x) => (
-          <line key={x} x1={x} y1={14} x2={x} y2={y(x)} />
+          <line key={x} x1={x} y1={14} x2={x} y2={y(x) - 4} />
         ))}
+      </g>
+      <g fill="none" strokeWidth={6} strokeLinecap="round" className={water ? "stroke-primary" : "stroke-current"}>
         {state === "broken" ? (
           <>
             <line x1={8} y1={y(8)} x2={46} y2={y(46)} />
@@ -32,10 +46,10 @@ export function QanatMark({ state = "still", className, title }: { state?: MarkS
       {state === "broken" ? (
         <circle cx={92} cy={y(92)} r={4} fill="none" stroke="currentColor" strokeWidth={3} className="stroke-destructive" />
       ) : (
-        <circle cx={92} cy={y(92)} r={5} fill="currentColor" />
+        <circle cx={92} cy={y(92)} r={5} className={water ? "fill-primary" : "fill-current"} />
       )}
       {state === "flowing" && (
-        <circle r={4} className="fill-current motion-reduce:hidden">
+        <circle r={4} className="fill-primary motion-reduce:hidden">
           <animateMotion dur="2.4s" repeatCount="indefinite" path={`M8,${y(8)} L86,${y(86)}`} />
         </circle>
       )}

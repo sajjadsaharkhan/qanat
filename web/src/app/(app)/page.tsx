@@ -1,5 +1,6 @@
 "use client";
 
+import { LayoutGrid } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
@@ -57,7 +58,7 @@ export default function OverviewPage() {
 
   return (
     <>
-      <PageHeader title="Overview" description={me.data ? `You're on the ${me.data.plan_name} Plan.` : undefined} />
+      <PageHeader title="Overview" icon={LayoutGrid} description={me.data ? `You're on the ${me.data.plan_name} Plan.` : undefined} />
 
       {quotas.isPending ? (
         <Skeleton className="h-48 w-full" />
@@ -75,9 +76,11 @@ export default function OverviewPage() {
           New accounts start on a zero-quota Plan, so requests are refused until an admin assigns a Plan with quota.
         </EmptyState>
       ) : (
-        <Card className="gap-0 py-5 shadow-none">
-          <CardContent className="flex flex-col gap-5" aria-live="polite">
+        <Card className="gap-0 overflow-hidden py-0 shadow-none" aria-live="polite">
+          <div className="border-b bg-brand-soft px-6 py-5">
             <Hero windows={windows} now={now} />
+          </div>
+          <CardContent className="py-5">
             <ul className="flex flex-col gap-3">
               {windows.map((w) => (
                 <li key={`${w.window}/${w.model_scope ?? ""}`} className="grid grid-cols-[6rem_1fr] items-center gap-x-4 gap-y-1 sm:grid-cols-[7rem_1fr_9rem_7rem]">
