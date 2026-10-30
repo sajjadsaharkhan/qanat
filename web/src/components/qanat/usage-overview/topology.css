@@ -1,0 +1,98 @@
+/*
+ * Ported from 9router (https://github.com/decolua/9router), src/app/globals.css.
+ * MIT License, Copyright (c) 2024-2026 decolua and contributors. See LICENSE-9router.
+ * Colors mapped to Qanat's palette (sand + primary) instead of neon yellow/cyan.
+ */
+@keyframes topology-router-pulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow:
+      0 0 8px var(--sand),
+      0 0 20px color-mix(in srgb, var(--primary) 65%, transparent),
+      0 0 32px color-mix(in srgb, var(--primary) 40%, transparent),
+      inset 0 0 10px color-mix(in srgb, var(--sand) 30%, transparent);
+  }
+  50% {
+    transform: scale(1.06);
+    box-shadow:
+      0 0 14px var(--sand),
+      0 0 28px var(--sand),
+      0 0 44px color-mix(in srgb, var(--primary) 60%, transparent),
+      inset 0 0 14px rgba(255, 255, 255, 0.25);
+  }
+}
+@keyframes topology-router-icon-shake {
+  0%, 100% { transform: rotate(0deg) scale(1); filter: drop-shadow(0 0 2px var(--sand)); }
+  25% { transform: rotate(-5deg) scale(1.08); filter: drop-shadow(0 0 6px var(--sand)); }
+  75% { transform: rotate(5deg) scale(1.08); filter: drop-shadow(0 0 6px var(--primary)); }
+}
+@keyframes topology-router-label-flicker {
+  0%, 100% { text-shadow: 0 0 6px var(--sand), 0 0 12px var(--primary); }
+  50% { text-shadow: 0 0 10px #fff, 0 0 18px var(--sand); }
+}
+@keyframes topology-edge-dash {
+  to { stroke-dashoffset: -36; }
+}
+@keyframes topology-edge-flicker {
+  0%, 100% { opacity: 0.85; }
+  40% { opacity: 1; }
+  55% { opacity: 0.55; }
+  70% { opacity: 1; }
+}
+.topology-router-core {
+  animation: topology-router-pulse 0.75s ease-in-out infinite;
+  border-color: var(--sand) !important;
+}
+.topology-router-icon {
+  animation: topology-router-icon-shake 0.45s ease-in-out infinite;
+}
+.topology-router-label {
+  animation: topology-router-label-flicker 0.7s ease-in-out infinite;
+}
+.topology-router-badge {
+  box-shadow: 0 0 10px var(--sand), 0 0 16px color-mix(in srgb, var(--primary) 60%, transparent);
+}
+.topology-edge-kame {
+  stroke-dasharray: 8 6;
+  animation: topology-edge-dash 0.22s linear infinite;
+}
+.topology-edge-halo {
+  animation: topology-edge-flicker 0.18s steps(2) infinite;
+}
+.topology-edge-plasma {
+  stroke-dasharray: 14 10;
+  animation: topology-edge-dash 0.18s linear infinite, topology-edge-flicker 0.22s steps(3) infinite;
+}
+
+/* React Flow controls: match app theme */
+.react-flow-controls-custom {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.react-flow-controls-custom button {
+  background: var(--card);
+  color: var(--foreground);
+  fill: var(--foreground);
+  border: 0;
+  border-bottom: 1px solid var(--border);
+}
+.react-flow-controls-custom button:last-child {
+  border-bottom: 0;
+}
+.react-flow-controls-custom button:hover {
+  background: var(--muted);
+}
+
+/* Qanat addition: no flashing or shaking for people who ask for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  .topology-router-core,
+  .topology-router-icon,
+  .topology-router-label,
+  .topology-edge-kame,
+  .topology-edge-halo,
+  .topology-edge-plasma {
+    animation: none;
+  }
+}

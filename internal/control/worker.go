@@ -128,7 +128,7 @@ func (w *Worker) commit(ctx context.Context, events []usage.Event) error {
 			cost := quota.FromMicro(ev.CostMicro)
 			params := func(bucket time.Time) db.UpsertUsage5mParams {
 				return db.UpsertUsage5mParams{
-					BucketStart: bucket, UserID: ev.UserID, KeyID: ev.KeyID, Provider: ev.Provider, UpstreamModel: ev.UpstreamModel,
+					BucketStart: bucket, UserID: ev.UserID, KeyID: ev.KeyID, Provider: ev.Provider, UpstreamModel: ev.UpstreamModel, AccountID: ev.AccountID,
 					Aborted: ev.Aborted, PriceVersion: ev.PriceVersion, InputTokens: ev.InputTokens, OutputTokens: ev.OutputTokens,
 					CacheReadTokens: ev.CacheReadTokens, CacheWriteTokens: ev.CacheWriteTokens, CostUsd: cost,
 				}

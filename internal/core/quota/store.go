@@ -183,6 +183,25 @@ func (s *Store) Charge(ctx context.Context, userID string, ws []Window, a Anchor
 	return err
 }
 
+// InFlight counts the requests these users have streaming right now: their
+// concurrency slots, ignoring stale ones a crashed gateway never released.
+func (s *Store) InFlight(ctx context.Context, userIDs []string, now time.Time) (int64, error) {
+	pipe := s.rdb.Pipeline()
+	min := strconv.FormatInt(now.Add(-staleInFlight).UnixMilli(), 10)
+	cmds := make([]*redis.IntCmd, len(userIDs))
+	for i, id := range userIDs {
+		cmds[i] = pipe.ZCount(ctx, concKey(id), min, "+inf")
+	}
+	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
+		return 0, err
+	}
+	var n int64
+	for _, c := range cmds {
+		n += c.Val()
+	}
+	return n, nil
+}
+
 // Release frees the concurrency slot taken by Admit.
 func (s *Store) Release(ctx context.Context, userID, reqID string) error {
 	return s.rdb.ZRem(ctx, concKey(userID), reqID).Err()

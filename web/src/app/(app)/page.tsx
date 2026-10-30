@@ -2,31 +2,14 @@
 
 import { LayoutGrid } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
 
 import { EmptyState, PageHeader, SectionHeader } from "@/components/qanat/page";
-import { QuotaBar } from "@/components/qanat/quota-bar";
+import { QuotaList, resetText, useNow } from "@/components/qanat/quota-list";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, type Schemas } from "@/lib/api/client";
-import { formatDuration, formatUsd } from "@/lib/format";
-import { quotaLabel } from "@/lib/quota-labels";
-
-/** Ticks once a minute so countdowns stay current without re-fetching. */
-function useNow(intervalMs = 60_000) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), intervalMs);
-    return () => clearInterval(id);
-  }, [intervalMs]);
-  return now;
-}
-
-function resetText(w: Schemas["QuotaWindow"], now: number) {
-  if (!w.resets_at) return "rolling";
-  return `in ${formatDuration(new Date(w.resets_at).getTime() - now)}`;
-}
+import { formatUsd } from "@/lib/format";
 
 /** The hero sentence comes from the window with the least headroom (design.md §7.3). */
 function Hero({ windows, now }: { windows: Schemas["QuotaWindow"][]; now: number }) {
@@ -81,20 +64,7 @@ export default function OverviewPage() {
             <Hero windows={windows} now={now} />
           </div>
           <CardContent className="py-5">
-            <ul className="flex flex-col gap-3">
-              {windows.map((w) => (
-                <li key={`${w.window}/${w.model_scope ?? ""}`} className="grid grid-cols-[6rem_1fr] items-center gap-x-4 gap-y-1 sm:grid-cols-[7rem_1fr_9rem_7rem]">
-                  <span>{quotaLabel(w)}</span>
-                  <QuotaBar used={w.used_usd} limit={w.limit_usd} label={`${quotaLabel(w)} quota used`} />
-                  <span className="text-end tabular-nums text-muted-foreground max-sm:col-start-2 max-sm:text-start">
-                    {formatUsd(w.used_usd)} of {formatUsd(w.limit_usd)}
-                  </span>
-                  <span className="text-end tabular-nums text-muted-foreground max-sm:hidden" data-volatile>
-                    {resetText(w, now)}
-                  </span>
-                </li>
-              ))}
-            </ul>
+            <QuotaList windows={windows} now={now} />
           </CardContent>
         </Card>
       )}
