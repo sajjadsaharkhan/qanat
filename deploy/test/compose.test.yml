@@ -1,0 +1,102 @@
+# Test stack for Qanat. Two profiles:
+#
+#   deps   (default)  Redis + PostgreSQL + mockupstream — for integration tests
+#   stack             + gateway + control + nginx — for acceptance and benchmarks
+#                     through the real edge (catches Nginx buffering mistakes)
+#
+#   docker compose -f deploy/test/compose.test.yml up -d --wait
+#   docker compose -f deploy/test/compose.test.yml --profile stack up -d --wait
+#
+# Ports are offset (5xxxx) so they never collide with a developer's own
+# services. Data lives on tmpfs: every `up` starts clean.
+name: qanat-test
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    ports: ["56379:6379"]
+    tmpfs: ["/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      retries: 15
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: qanat
+      POSTGRES_PASSWORD: qanat
+      POSTGRES_DB: qanat_test
+    ports: ["55432:5432"]
+    tmpfs: ["/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qanat -d qanat_test"]
+      interval: 2s
+      retries: 15
+
+  mockupstream:
+    build:
+      context: ../..
+      dockerfile: deploy/test/Dockerfile.tools
+      target: mockupstream
+    command: ["-addr", ":9090", "-fixtures", "/fixtures", "-speed", "1"]
+    volumes: ["../../test/fixtures/upstream:/fixtures:ro"]
+    ports: ["59090:9090"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/healthz"]
+      interval: 2s
+      retries: 15
+
+  oidcmock: # Keycloak stand-in, TEST ONLY (internal/testkit/oidctest)
+    profiles: ["stack"]
+    build:
+      context: ../..
+      dockerfile: deploy/test/Dockerfile.tools
+      target: oidcmock
+    command: ["-addr", ":9180", "-public-url", "http://localhost:59180"]
+    ports: ["59180:9180"]
+
+  # --- profile: stack ----------------------------------------------------
+  # gateway/control build from the project Dockerfile, created in P0.
+  gateway:
+    profiles: ["stack"]
+    build: { context: ../.., target: qanat }
+    command: ["gateway"]
+    environment:
+      QANAT_REDIS_ADDR: redis:6379
+      QANAT_POSTGRES_DSN: postgres://qanat:qanat@postgres:5432/qanat_test?sslmode=disable
+      GOMEMLIMIT: 400MiB
+    depends_on:
+      redis: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+      mockupstream: { condition: service_healthy }
+    stop_grace_period: 10m
+    deploy: { resources: { limits: { cpus: "1", memory: 512M } } } # PRD §9.2 capacity target
+
+  control:
+    profiles: ["stack"]
+    build: { context: ../.., target: qanat }
+    command: ["control"]
+    environment:
+      QANAT_REDIS_ADDR: redis:6379
+      QANAT_POSTGRES_DSN: postgres://qanat:qanat@postgres:5432/qanat_test?sslmode=disable
+      QANAT_TEST_MODE: "1" # enables the test-only seeding endpoints used by the acceptance driver
+      # Split horizon: browsers reach the issuer at the public URL (also the
+      # expected `iss` claim); the control plane fetches discovery and JWKS
+      # over the compose network. Production Keycloak needs the same two
+      # settings when its public and internal URLs differ.
+      QANAT_OIDC_ISSUER: http://localhost:59180/realms/qanat
+      QANAT_OIDC_INTERNAL_URL: http://oidcmock:9180/realms/qanat
+      BOOTSTRAP_ADMIN_EMAIL: admin@example.com
+    ports: ["58081:8081"]
+    depends_on:
+      redis: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+
+  nginx:
+    profiles: ["stack"]
+    image: nginx:1.27-alpine
+    volumes: ["./nginx.test.conf:/etc/nginx/conf.d/default.conf:ro"]
+    ports: ["58080:80"]
+    depends_on: [gateway]

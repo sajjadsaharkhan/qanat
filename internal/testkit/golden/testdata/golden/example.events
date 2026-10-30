@@ -1,0 +1,6 @@
+event: message_start
+data: {"message":{"id":"<scrubbed>"},"type":"message_start"}
+
+event: message_stop
+data: {"type":"message_stop"}
+

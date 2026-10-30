@@ -1,0 +1,12 @@
+{"type": "meta", "status": 200, "headers": {"Content-Type": "text/event-stream"}, "note": "SYNTHETIC fixture in the documented shape. Replace with a scrubbed real recording (see docs/testing.md#recording-fixtures)."}
+{"type": "chunk", "at_ms": 380, "data": "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_02\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-opus-4-7\",\"content\":[],\"usage\":{\"input_tokens\":5120,\"output_tokens\":1}}}\n\n"}
+{"type": "chunk", "at_ms": 381, "data": "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\",\"signature\":\"\"}}\n\n"}
+{"type": "chunk", "at_ms": 450, "data": "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Need to list files first.\"}}\n\n"}
+{"type": "chunk", "at_ms": 460, "data": "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"sig_redacted\"}}\n\n"}
+{"type": "chunk", "at_ms": 461, "data": "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n"}
+{"type": "chunk", "at_ms": 470, "data": "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_01\",\"name\":\"Bash\",\"input\":{}}}\n\n"}
+{"type": "chunk", "at_ms": 500, "data": "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"command\\\": \\\"ls\"}}\n\n"}
+{"type": "chunk", "at_ms": 520, "data": "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\" -la\\\"}\"}}\n\n"}
+{"type": "chunk", "at_ms": 521, "data": "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\n"}
+{"type": "chunk", "at_ms": 530, "data": "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":64}}\n\n"}
+{"type": "chunk", "at_ms": 531, "data": "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"}

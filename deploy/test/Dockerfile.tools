@@ -1,0 +1,23 @@
+# Test tooling images (mock upstream, load generator). Not shipped.
+FROM golang:1.24-alpine AS build
+WORKDIR /src
+COPY go.mod ./
+COPY internal ./internal
+COPY cmd/mockupstream ./cmd/mockupstream
+COPY cmd/loadgen ./cmd/loadgen
+COPY cmd/oidcmock ./cmd/oidcmock
+RUN CGO_ENABLED=0 go build -o /out/mockupstream ./cmd/mockupstream \
+ && CGO_ENABLED=0 go build -o /out/loadgen ./cmd/loadgen \
+ && CGO_ENABLED=0 go build -o /out/oidcmock ./cmd/oidcmock
+
+FROM alpine:3.20 AS mockupstream
+COPY --from=build /out/mockupstream /usr/local/bin/mockupstream
+ENTRYPOINT ["mockupstream"]
+
+FROM alpine:3.20 AS loadgen
+COPY --from=build /out/loadgen /usr/local/bin/loadgen
+ENTRYPOINT ["loadgen"]
+
+FROM alpine:3.20 AS oidcmock
+COPY --from=build /out/oidcmock /usr/local/bin/oidcmock
+ENTRYPOINT ["oidcmock"]

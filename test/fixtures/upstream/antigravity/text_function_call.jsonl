@@ -1,0 +1,4 @@
+{"type": "meta", "status": 200, "headers": {"Content-Type": "text/event-stream"}, "note": "SYNTHETIC fixture in the documented shape. Replace with a scrubbed real recording (see docs/testing.md#recording-fixtures)."}
+{"type": "chunk", "at_ms": 500, "data": "data: {\"response\":{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"thought\":true,\"text\":\"Check the directory.\"}]}}],\"modelVersion\":\"gemini-3-pro\"}}\n\n"}
+{"type": "chunk", "at_ms": 600, "data": "data: {\"response\":{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"Listing files\"}]}}]}}\n\n"}
+{"type": "chunk", "at_ms": 700, "data": "data: {\"response\":{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"functionCall\":{\"name\":\"Bash\",\"args\":{\"command\":\"ls -la\"}}}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":3900,\"candidatesTokenCount\":42,\"thoughtsTokenCount\":20,\"cachedContentTokenCount\":0}}}\n\n"}
