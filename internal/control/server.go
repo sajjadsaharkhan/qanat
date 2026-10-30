@@ -125,6 +125,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.Handle("POST /api/me/keys", user(s.createKey))
 	mux.Handle("DELETE /api/me/keys/{id}", user(s.revokeKey))
 	mux.Handle("GET /api/me/setup", user(s.setup))
+	mux.Handle("POST /api/me/setup/models", user(s.setupModels))
 
 	mux.Handle("GET /api/admin/users", admin(s.listUsers))
 	mux.Handle("PATCH /api/admin/users/{id}", admin(s.updateUser))

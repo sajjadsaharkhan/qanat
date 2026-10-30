@@ -22,56 +22,110 @@ export function testCommand(gatewayUrl: string, key: string): string {
   return `curl -sS ${gatewayUrl}/v1/models -H "Authorization: Bearer ${key}" -H "anthropic-version: 2023-06-01"`;
 }
 
-export type PickerOption = { model: string; label: string; description: string; behavesAs: string };
+export type PickerOption = {
+  model: string;
+  label: string;
+  description: string;
+  behavesAs?: string;
+};
 
-/** "claude-sonnet-5-5" → "Claude Sonnet 5.5"; dots and version tails kept. */
-export function prettyModelName(model: string): string {
-  return model
-    .split("-")
-    .map((part) => (/^\d/.test(part) ? part : part.charAt(0).toUpperCase() + part.slice(1)))
-    .join(" ");
+export type ClaudeFamily = "opus" | "sonnet" | "haiku";
+export const claudeFamilies: ClaudeFamily[] = ["opus", "sonnet", "haiku"];
+
+/** The model without its provider prefix: "cc/claude-opus-4-7" → "claude-opus-4-7". */
+export function bareModel(model: string): string {
+  return model.slice(model.indexOf("/") + 1);
 }
 
 /**
- * The full Claude Code settings template, 9router-style: env defaults plus a
- * modelPicker with every stored provider-catalog model, prefixed. Non-Claude
- * models behave as the Claude slot their name suggests (opus/haiku/sonnet).
+ * Sort key for a Claude model of one family, or null when the name is not a
+ * Claude model of it. Both id shapes count ("claude-opus-4-7",
+ * "claude-3-5-haiku-20241022"); version parts compare numerically, then the
+ * snapshot date, and an undated alias outranks its dated twin.
  */
-export function settingsTemplate(opts: {
-  gatewayUrl: string;
-  key: string;
-  sonnetModel: string;
-  opusModel: string;
-  haikuModel: string;
-  catalogs: { prefix: string; name: string; models: string[] }[];
-}): string {
-  const behavesAs = (model: string) => {
-    if (model.startsWith("claude-")) return model;
-    if (model.includes("opus")) return opts.opusModel;
-    if (model.includes("haiku") || model.includes("flash") || model.includes("mini")) return opts.haikuModel;
-    return opts.sonnetModel;
+function claudeRank(model: string, family: ClaudeFamily): number[] | null {
+  const bare = bareModel(model);
+  if (!bare.startsWith("claude-") || !bare.split("-").includes(family)) return null;
+  const parts = bare.split("-").filter((p) => /^\d+$/.test(p));
+  const date = parts.find((p) => p.length === 8);
+  const version = parts.filter((p) => p.length < 8).map(Number);
+  return [...version, ...Array(4 - Math.min(4, version.length)).fill(0), date ? Number(date) : Infinity];
+}
+
+function compareRank(a: number[], b: number[]): number {
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i] ?? 0;
+    const y = b[i] ?? 0;
+    if (x !== y) return x < y ? -1 : 1; // not x - y: Infinity - Infinity is NaN
+  }
+  return 0;
+}
+
+/**
+ * The newest Claude model of each family in a /v1/models list. A cc/ name
+ * wins over the same model through another provider; families with no
+ * Claude model are left out.
+ */
+export function latestClaude(models: string[]): Partial<Record<ClaudeFamily, string>> {
+  const out: Partial<Record<ClaudeFamily, string>> = {};
+  for (const family of claudeFamilies) {
+    let best: { model: string; rank: number[] } | undefined;
+    for (const model of models) {
+      const rank = claudeRank(model, family);
+      if (!rank) continue;
+      const d = best ? compareRank(rank, best.rank) : 1;
+      if (d > 0 || (d === 0 && model.startsWith("cc/") && !best!.model.startsWith("cc/"))) best = { model, rank };
+    }
+    if (best) out[family] = best.model;
+  }
+  return out;
+}
+
+/** "cc/claude-sonnet-5-5" → "Claude Sonnet 5.5"; prefix dropped, snapshot dates kept. */
+export function prettyModelName(model: string): string {
+  const words: string[] = [];
+  let version = false;
+  for (const part of bareModel(model).split("-")) {
+    const short = /^\d{1,2}$/.test(part);
+    if (short && version) words[words.length - 1] += `.${part}`;
+    else words.push(/^\d/.test(part) ? part : part.charAt(0).toUpperCase() + part.slice(1));
+    version = short;
+  }
+  return words.join(" ");
+}
+
+const providerNames: Record<string, string> = {
+  cc: "Claude",
+  cx: "Codex",
+  ag: "Antigravity",
+};
+
+/**
+ * The full Claude Code settings.json, 9router-style: env defaults plus a
+ * modelPicker with the chosen /v1/models names. Only the newest Claude
+ * opus/sonnet/haiku carry behavesAs (their own bare id), so Claude Code
+ * applies those models' capabilities; every other option goes without.
+ */
+export function settingsTemplate(opts: { gatewayUrl: string; key: string; slots: Record<ClaudeFamily, string>; models: string[] }): string {
+  const latest = new Set(Object.values(latestClaude(opts.models)));
+  const options: PickerOption[] = opts.models.map((model) => {
+    const prefix = model.includes("/") ? model.slice(0, model.indexOf("/")) : "";
+    const via = providerNames[prefix] ? `Qanat (${providerNames[prefix]})` : "Qanat";
+    const option: PickerOption = {
+      model,
+      label: prettyModelName(model),
+      description: `${prettyModelName(model)} via ${via}`,
+    };
+    if (latest.has(model)) option.behavesAs = bareModel(model);
+    return option;
+  });
+  const env: Record<string, string> = {
+    ANTHROPIC_AUTH_TOKEN: opts.key,
+    ANTHROPIC_BASE_URL: opts.gatewayUrl,
+    API_TIMEOUT_MS: "3000000",
   };
-  const options: PickerOption[] = opts.catalogs.flatMap(({ prefix, name, models }) =>
-    models.map((m) => ({
-      model: `${prefix}/${m}`,
-      label: prettyModelName(m),
-      description: `${prettyModelName(m)} via Qanat (${name})`,
-      behavesAs: behavesAs(m),
-    })),
-  );
-  return JSON.stringify(
-    {
-      env: {
-        ANTHROPIC_AUTH_TOKEN: opts.key,
-        ANTHROPIC_BASE_URL: opts.gatewayUrl,
-        API_TIMEOUT_MS: "3000000",
-        ANTHROPIC_DEFAULT_HAIKU_MODEL: opts.haikuModel,
-        ANTHROPIC_DEFAULT_SONNET_MODEL: opts.sonnetModel,
-        ANTHROPIC_DEFAULT_OPUS_MODEL: opts.opusModel,
-      },
-      modelPicker: { options },
-    },
-    null,
-    2,
-  );
+  if (opts.slots.haiku) env.ANTHROPIC_DEFAULT_HAIKU_MODEL = opts.slots.haiku;
+  if (opts.slots.sonnet) env.ANTHROPIC_DEFAULT_SONNET_MODEL = opts.slots.sonnet;
+  if (opts.slots.opus) env.ANTHROPIC_DEFAULT_OPUS_MODEL = opts.slots.opus;
+  return JSON.stringify({ env, modelPicker: { options } }, null, 2);
 }

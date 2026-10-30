@@ -168,6 +168,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/me/setup/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** The models the gateway's /v1/models lists for one of the caller's keys */
+        post: operations["setupModels"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/me/requests": {
         parameters: {
             query?: never;
@@ -1525,6 +1542,35 @@ export interface operations {
                     "application/json": components["schemas"]["Setup"];
                 };
             };
+        };
+    };
+    setupModels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    key: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        models: string[];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
         };
     };
     recentRequests: {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/netip"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"qanat/internal/core/apikey"
 	"qanat/internal/core/quota"
 	"qanat/internal/core/usage"
+	"qanat/internal/gateway"
 	"qanat/internal/store/db"
 )
 
@@ -218,6 +220,51 @@ type setupResponse struct {
 
 func (s *Server) setup(w http.ResponseWriter, _ *http.Request, _ *db.GetUserRow) {
 	writeJSON(w, http.StatusOK, setupResponse{GatewayURL: s.opts.GatewayURL})
+}
+
+type setupModelsRequest struct {
+	Key string `json:"key"`
+}
+
+type setupModelsResponse struct {
+	Models []string `json:"models"`
+}
+
+// setupModels answers what the gateway's /v1/models would list for one of
+// the caller's own keys, so the Setup page can build a model picker without
+// the dashboard talking to the data plane (design.md §10.3 rule 7). It reads
+// a fresh snapshot, the same one the gateway builds, so the lists match.
+func (s *Server) setupModels(w http.ResponseWriter, r *http.Request, u *db.GetUserRow) {
+	var req setupModelsRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	key := strings.TrimSpace(req.Key)
+	invalid := func() {
+		fail(w, http.StatusBadRequest, "invalid_key", "That isn't one of your active Qanat API keys. Paste a key from the Keys page.")
+	}
+	if !apikey.LooksValid(key) {
+		invalid()
+		return
+	}
+	snap, err := gateway.Load(r.Context(), s.pg, s.opts.Box, s.log)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	k, _, p, ok := snap.Lookup(key)
+	// Someone else's key reads as invalid: the page never confirms a key
+	// exists unless it is the caller's.
+	if !ok || k.UserID != u.ID || (k.ExpiresAt != nil && s.now().After(*k.ExpiresAt)) {
+		invalid()
+		return
+	}
+	names := snap.ModelNames(p, k)
+	sort.Strings(names)
+	if names == nil {
+		names = []string{}
+	}
+	writeJSON(w, http.StatusOK, setupModelsResponse{Models: names})
 }
 
 // --- audit -------------------------------------------------------------------

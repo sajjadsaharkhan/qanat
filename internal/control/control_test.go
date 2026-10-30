@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"qanat/internal/core/quota"
 	"qanat/internal/core/secretbox"
 	"qanat/internal/platform"
+	"qanat/internal/store/db"
 	"qanat/internal/store/storetest"
 	"qanat/internal/testkit/itenv"
 	"qanat/internal/testkit/oidctest"
@@ -540,5 +542,39 @@ func TestAccounts_KindsPatchTestMove(t *testing.T) {
 	}
 	if st := h.do(c, "POST", "/api/admin/accounts/"+tokAcct.ID+"/move", `{"direction":"down"}`, nil); st != 409 {
 		t.Fatalf("move at bottom: %d", st)
+	}
+}
+
+// The Setup page lists what /v1/models would for one of the caller's own
+// keys; other users' keys and malformed keys read as invalid.
+func TestSetupModels_OwnKeyOnly(t *testing.T) {
+	h := newHarness(t)
+	c := h.signInRoot()
+	if st := h.do(c, "PUT", "/api/admin/mappings", `[{"pattern":"opus","provider":"claude","upstream_model":"claude-opus-4-7","priority":0}]`, nil); st != 204 {
+		t.Fatalf("mapping: %d", st)
+	}
+	var created createKeyResponse
+	if st := h.do(c, "POST", "/api/me/keys", `{"name":"laptop"}`, &created); st != 201 {
+		t.Fatalf("create: %d", st)
+	}
+	var out setupModelsResponse
+	if st := h.do(c, "POST", "/api/me/setup/models", `{"key":"`+created.Key+`"}`, &out); st != 200 || !slices.Contains(out.Models, "opus") {
+		t.Fatalf("own key: %d %+v", st, out)
+	}
+	if st := h.do(c, "POST", "/api/me/setup/models", `{"key":"qnt_live_nope"}`, nil); st != 400 {
+		t.Fatalf("malformed key: %d", st)
+	}
+
+	ctx := context.Background()
+	var other string
+	if err := h.s.pg.QueryRow(ctx, `INSERT INTO users (email, plan_id) SELECT 'dev@example.com', id FROM plans WHERE is_default RETURNING id`).Scan(&other); err != nil {
+		t.Fatal(err)
+	}
+	otherKey, display, hash := apikey.New()
+	if _, err := h.s.q.CreateKey(ctx, db.CreateKeyParams{UserID: other, Name: "theirs", Hash: hash, Prefix: display}); err != nil {
+		t.Fatal(err)
+	}
+	if st := h.do(c, "POST", "/api/me/setup/models", `{"key":"`+otherKey+`"}`, nil); st != 400 {
+		t.Fatalf("someone else's key: %d", st)
 	}
 }

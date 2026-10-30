@@ -99,6 +99,22 @@ paths:
       operationId: setup
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Setup" } } } }
+  /api/me/setup/models:
+    post:
+      operationId: setupModels
+      summary: The models the gateway's /v1/models lists for one of the caller's keys
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [key], properties: { key: { type: string } } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, required: [models], properties: { models: { type: array, items: { type: string } } } }
+        "400": { $ref: "#/components/responses/Error" }
   /api/me/requests:
     get:
       operationId: recentRequests
