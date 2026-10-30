@@ -37,6 +37,9 @@ type accountResponse struct {
 	LastCheckAt    *time.Time `json:"last_check_at"`
 	LastCheckOk    *bool      `json:"last_check_ok"`
 	LastCheckError *string    `json:"last_check_error"`
+	Email          *string    `json:"email"` // OAuth identity; null for key/token accounts
+	LastRefreshAt  *time.Time `json:"last_refresh_at"`
+	LastRefreshErr *string    `json:"last_refresh_error"`
 	Position       int64      `json:"position"`
 	Proxy          string     `json:"proxy"` // "inherit", "direct", a proxy ID or "group:<id>" (§8.2)
 }
@@ -59,6 +62,7 @@ func (s *Server) listAccounts(w http.ResponseWriter, r *http.Request, _ *db.GetU
 			State: a.State, CooldownUntil: a.CooldownUntil, CreatedAt: a.CreatedAt,
 			AuthKind: a.AuthKind, ExpiresAt: a.ExpiresAt, DisabledAt: a.DisabledAt,
 			LastCheckAt: a.LastCheckAt, LastCheckOk: checkOk, LastCheckError: a.LastCheckError,
+			Email: a.Email, LastRefreshAt: a.LastRefreshAt, LastRefreshErr: a.LastRefreshError,
 			Position: a.Position.Int64, Proxy: proxyChoice{a.ProxyID, a.ProxyGroupID, a.ProxyDirect}.String(),
 		})
 	}
@@ -82,10 +86,11 @@ type createAccountRequest struct {
 }
 
 // validAuthKind reports whether kind is accepted for provider, answering with
-// the API error when not.
+// the API error when not. "oauth" accounts exist only through the sign-in
+// flow; createAccount and validateAccount reject pasted OAuth credentials.
 func validAuthKind(w http.ResponseWriter, providerID, kind string) bool {
-	if kind != "token" && kind != "api_key" {
-		fail(w, http.StatusBadRequest, "invalid_auth_kind", `Auth kind must be "token" or "api_key".`)
+	if kind != "token" && kind != "api_key" && kind != "oauth" {
+		fail(w, http.StatusBadRequest, "invalid_auth_kind", `Auth kind must be "oauth", "token" or "api_key".`)
 		return false
 	}
 	if kind == "token" && providerID != "claude" {
@@ -94,6 +99,17 @@ func validAuthKind(w http.ResponseWriter, providerID, kind string) bool {
 		return false
 	}
 	return true
+}
+
+// rejectPastedOAuth keeps the sign-in flow the only way to make an OAuth
+// account: a pasted access token can't carry the refresh half.
+func rejectPastedOAuth(w http.ResponseWriter, kind string) bool {
+	if kind == "oauth" {
+		fail(w, http.StatusBadRequest, "invalid_auth_kind",
+			`OAuth accounts are created with the provider's own sign-in flow, not a pasted credential. Use "Sign in" in the Add-account dialog.`)
+		return true
+	}
+	return false
 }
 
 func newUUID() string {
@@ -131,6 +147,9 @@ func (s *Server) createAccount(w http.ResponseWriter, r *http.Request, actor *db
 		req.AuthKind = "token"
 	}
 	if !validAuthKind(w, req.Provider, req.AuthKind) {
+		return
+	}
+	if rejectPastedOAuth(w, req.AuthKind) {
 		return
 	}
 	id := newUUID()
@@ -222,6 +241,9 @@ func (s *Server) updateAccount(w http.ResponseWriter, r *http.Request, actor *db
 		if !validAuthKind(w, cur.Provider, *req.AuthKind) {
 			return
 		}
+		if rejectPastedOAuth(w, *req.AuthKind) {
+			return
+		}
 		authKind = *req.AuthKind
 	}
 	expires := cur.ExpiresAt
@@ -240,6 +262,11 @@ func (s *Server) updateAccount(w http.ResponseWriter, r *http.Request, actor *db
 	credentials := cur.Credentials
 	credChanged := false
 	if req.AccessToken != nil {
+		if cur.AuthKind == "oauth" {
+			fail(w, http.StatusBadRequest, "invalid_auth_kind",
+				"This is an OAuth account: its tokens are replaced by signing in again, not by pasting a credential.")
+			return
+		}
 		switch {
 		case *req.AccessToken == "":
 			credentials = nil
@@ -386,6 +413,9 @@ func (s *Server) validateAccount(w http.ResponseWriter, r *http.Request, _ *db.G
 		req.AuthKind = "token"
 	}
 	if !validAuthKind(w, req.Provider, req.AuthKind) {
+		return
+	}
+	if rejectPastedOAuth(w, req.AuthKind) {
 		return
 	}
 	if req.AccessToken == "" {

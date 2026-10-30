@@ -3,6 +3,7 @@
 -- name: ListAccounts :many
 SELECT id, provider, label, base_url, (credentials IS NOT NULL)::boolean AS has_credentials, state, cooldown_until, created_at,
        auth_kind, expires_at, disabled_at, last_check_at, last_check_ok, last_check_error, position,
+       email, last_refresh_at, last_refresh_error,
        proxy_id, proxy_group_id, proxy_direct
 FROM provider_accounts
 ORDER BY position;
@@ -14,8 +15,22 @@ FROM provider_accounts
 WHERE id = $1;
 
 -- name: CreateAccount :exec
-INSERT INTO provider_accounts (id, provider, label, base_url, credentials, auth_kind, expires_at, position, proxy_id, proxy_group_id, proxy_direct)
-VALUES ($1, $2, $3, $4, $5, $6, $7, (SELECT coalesce(max(position), 0) + 1 FROM provider_accounts), $8, $9, $10);
+INSERT INTO provider_accounts (id, provider, label, base_url, credentials, auth_kind, expires_at, email, position, proxy_id, proxy_group_id, proxy_direct)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, (SELECT coalesce(max(position), 0) + 1 FROM provider_accounts), $9, $10, $11);
+
+-- OAuth sign-in dedup (like 9router's connection merge): a re-sign-in with the
+-- same provider identity refreshes the existing account instead of adding one.
+-- name: FindOAuthAccount :many
+SELECT id FROM provider_accounts
+WHERE provider = $1 AND email = $2 AND email <> '' AND auth_kind = 'oauth'
+ORDER BY position
+LIMIT 1;
+
+-- name: MergeOAuthAccount :execrows
+UPDATE provider_accounts
+SET credentials = $2, expires_at = $3, auth_kind = 'oauth', email = $4,
+    state = 'healthy', cooldown_until = NULL, disabled_at = NULL
+WHERE id = $1;
 
 -- name: SetAccountProxy :execrows
 UPDATE provider_accounts SET proxy_id = $2, proxy_group_id = $3, proxy_direct = $4 WHERE id = $1;

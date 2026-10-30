@@ -1,16 +1,18 @@
 /*
  * Ported from 9router (https://github.com/decolua/9router),
- * src/app/(dashboard)/dashboard/providers/[id]/AddApiKeyModal.js.
+ * src/app/(dashboard)/dashboard/providers/[id]/AddApiKeyModal.js and
+ * src/shared/components/OAuthModal.js.
  * MIT License, Copyright (c) 2024-2026 decolua and contributors. See LICENSE-9router.
- * Qanat change: no web-OAuth login and no bulk import. A Claude account signs
- * in with a token from the official `claude setup-token` command; Codex and
- * Antigravity take an API key. The Check button calls the API's validate
- * endpoint, and the credential is sealed with the master key on save.
+ * Qanat change: Claude signs in through its own OAuth flow (OAuthSignIn here,
+ * relayed by the /callback page) or takes an API key / `claude setup-token`
+ * token; Codex and Antigravity take an API key until their flows land. The
+ * Check button calls the API's validate endpoint, and credentials are sealed
+ * with the master key on save.
  */
 "use client";
 
-import { useState } from "react";
-import { Loader2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ExternalLink, Loader2 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -22,9 +24,10 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { ProxyChoiceOptions } from "@/components/qanat/proxy-options";
-import { api, errorMessage, type Schemas } from "@/lib/api/client";
+import { api, errorMessage, fetchClient, type Schemas } from "@/lib/api/client";
 
 type Account = Schemas["Account"];
+type AuthKind = "oauth" | "token" | "api_key";
 
 function ProxyField({
   value,
@@ -68,6 +71,162 @@ function CheckBadge({ state, message }: { state: "idle" | "loading" | "ok" | "ba
   );
 }
 
+/** The redirect_uri the provider comes back to — this dashboard's /callback on loopback. */
+function callbackRedirectUri(): string {
+  const port = window.location.port || (window.location.protocol === "https:" ? "443" : "80");
+  return `http://localhost:${port}/callback`;
+}
+
+/*
+ * OAuthSignIn ports 9router's OAuthModal: it asks the API for the provider's
+ * authorize URL, opens it in a popup, and waits for the /callback page to
+ * relay the code. The paste field covers remote dashboards and blocked
+ * popups. Codex's port-1455 capture and poll arrive with that flow (OA2).
+ */
+function OAuthSignIn({ provider, providerName, onDone }: { provider: string; providerName: string; onDone: () => void }) {
+  const qc = useQueryClient();
+  const { mutate: exchangeMutate, isPending: exchanging, error: exchangeError } = api.useMutation(
+    "post",
+    "/api/admin/accounts/oauth/{provider}/exchange",
+  );
+
+  const [starting, setStarting] = useState(false);
+  const [pending, setPending] = useState<{ state: string; redirectUri: string; authUrl: string } | null>(null);
+  const [manualUrl, setManualUrl] = useState("");
+
+  const connect = useCallback(
+    (code: string, state: string, redirectUri: string) => {
+      exchangeMutate(
+        { params: { path: { provider: provider as "claude" } }, body: { code, state, redirect_uri: redirectUri } },
+        {
+          onSuccess: (res) => {
+            qc.invalidateQueries({ queryKey: ["get", "/api/admin/accounts"] });
+            toast(res.merged ? "Signed in again — the existing account was refreshed." : `Connected to ${providerName} via sign-in.`);
+            onDone();
+          },
+          onError: (err) => toast.error(errorMessage(err)),
+        },
+      );
+    },
+    [exchangeMutate, qc, provider, providerName, onDone],
+  );
+
+  useEffect(() => {
+    if (!pending) return;
+    let done = false; // the pending sign-in is single-use server-side; ignore re-deliveries
+    const finish = (code: string, state: string) => {
+      if (done) return;
+      done = true;
+      connect(code, state, pending.redirectUri);
+    };
+    const onRelay = (ev: MessageEvent) => {
+      const d = ev.data as Partial<Relay>;
+      if (d?.source !== "qanat-oauth" || !d.code) return;
+      finish(d.code, d.state || "");
+    };
+    const onMessage = (ev: MessageEvent) => {
+      if (ev.origin !== window.location.origin) return;
+      onRelay(ev);
+    };
+    window.addEventListener("message", onMessage);
+    const channel = "BroadcastChannel" in window ? new BroadcastChannel("oauth_callback") : null;
+    channel?.addEventListener("message", onRelay);
+    return () => {
+      window.removeEventListener("message", onMessage);
+      channel?.close();
+    };
+  }, [pending, connect]);
+
+  const redirectUri = useMemo(() => callbackRedirectUri(), []);
+
+  const start = async () => {
+    setStarting(true);
+    try {
+      const { data, error } = await fetchClient.GET("/api/admin/accounts/oauth/{provider}/authorize", {
+        params: { path: { provider: provider as "claude" }, query: { redirect_uri: redirectUri } },
+      });
+      if (error) {
+        toast.error(errorMessage(error));
+        return;
+      }
+      setPending({ state: data.state, redirectUri: data.redirect_uri, authUrl: data.auth_url });
+      const popup = window.open(data.auth_url, "qanat-oauth", "width=600,height=700");
+      if (!popup) toast.error("The sign-in popup was blocked — open the URL below manually.");
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  const pasteRedirect = () => {
+    const raw = manualUrl.trim();
+    if (!raw) return;
+    let code = "";
+    let state = "";
+    try {
+      const u = new URL(raw);
+      code = u.searchParams.get("code") ?? "";
+      state = u.searchParams.get("state") ?? (u.hash.length > 1 ? decodeURIComponent(u.hash.slice(1)) : "");
+    } catch {
+      toast.error("Paste the full URL the provider redirected to.");
+      return;
+    }
+    if (!code) {
+      toast.error("That URL has no authorization code in it.");
+      return;
+    }
+    connect(code, state, pending?.redirectUri ?? redirectUri);
+  };
+
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="rounded-lg bg-brand-soft px-3 py-2 text-xs text-brand-text">
+        Signs in through {providerName}&apos;s own OAuth flow — the same one the official client uses. The tokens are sealed with the master
+        key and refreshed by Qanat.
+      </p>
+      {pending ? (
+        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 aria-hidden className="size-4 animate-spin" /> Waiting for {providerName}… complete the sign-in in the popup.
+        </p>
+      ) : null}
+      <Button type="button" onClick={start} disabled={starting || exchanging} className="self-start">
+        {starting ? <Loader2 aria-hidden className="me-1.5 size-4 animate-spin" /> : <ExternalLink aria-hidden className="me-1.5 size-4" />}
+        Sign in with {providerName}
+      </Button>
+      {pending && (
+        <div className="flex flex-col gap-2 rounded-lg border px-3 py-2.5">
+          <p className="text-xs text-muted-foreground">
+            On another machine, or the popup was blocked? Open this URL yourself, then paste the address it redirects to.
+          </p>
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={() => navigator.clipboard.writeText(pending.authUrl)}>
+              Copy sign-in URL
+            </Button>
+          </div>
+          <div className="flex items-end gap-2">
+            <div className="flex flex-1 flex-col gap-1.5">
+              <Label htmlFor="oauth-paste">Redirect URL</Label>
+              <Input
+                id="oauth-paste"
+                value={manualUrl}
+                onChange={(e) => setManualUrl(e.target.value)}
+                placeholder={`${pending.redirectUri}?code=…`}
+                autoComplete="off"
+              />
+            </div>
+            <Button type="button" variant="outline" onClick={pasteRedirect} disabled={!manualUrl.trim() || exchanging}>
+              {exchanging ? <Loader2 aria-hidden className="me-1.5 size-4 animate-spin" /> : null}
+              Connect
+            </Button>
+          </div>
+        </div>
+      )}
+      {exchangeError && <p className="text-xs text-destructive-text">{errorMessage(exchangeError)}</p>}
+    </div>
+  );
+}
+
+type Relay = { source: "qanat-oauth"; code: string; state: string };
+
 export function AddAccountDialog({
   provider,
   providerName,
@@ -91,7 +250,7 @@ export function AddAccountDialog({
   const create = api.useMutation("post", "/api/admin/accounts");
   const check = api.useMutation("post", "/api/admin/accounts/validate");
 
-  const [kind, setKind] = useState<"token" | "api_key">("api_key");
+  const [kind, setKind] = useState<AuthKind>(provider === "claude" ? "oauth" : "api_key");
   const [label, setLabel] = useState("");
   const [credential, setCredential] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
@@ -99,7 +258,7 @@ export function AddAccountDialog({
   const [proxy, setProxy] = useState("inherit");
 
   const reset = () => {
-    setKind("api_key");
+    setKind(provider === "claude" ? "oauth" : "api_key");
     setLabel("");
     setCredential("");
     setBaseUrl("");
@@ -109,7 +268,7 @@ export function AddAccountDialog({
 
   const checkBody = {
     provider: provider as "claude" | "codex" | "antigravity",
-    auth_kind: kind,
+    auth_kind: kind === "api_key" ? ("api_key" as const) : ("token" as const),
     base_url: baseUrl.trim() || null,
     access_token: credential.trim(),
   };
@@ -137,7 +296,7 @@ export function AddAccountDialog({
         body: {
           provider: provider as "claude" | "codex" | "antigravity",
           label: label.trim(),
-          auth_kind: kind,
+          auth_kind: kind === "api_key" ? ("api_key" as const) : ("token" as const),
           access_token: credential.trim(),
           base_url: baseUrl.trim() || null,
           expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
@@ -163,75 +322,93 @@ export function AddAccountDialog({
         <DialogHeader>
           <DialogTitle>Add {providerName} account</DialogTitle>
           <DialogDescription>
-            Onboarding stays on official credentials. They are sealed with the master key and never shown again.
+            Sign in through the provider&apos;s own flow, or paste an official credential. Everything is sealed with the master key and never
+            shown again.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSave} className="flex flex-col gap-4">
           {provider === "claude" && (
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="auth_kind">Credential kind</Label>
-              <Select value={kind} onValueChange={(v) => { resetCheck(); setKind(v as "token" | "api_key"); }}>
+              <Select value={kind} onValueChange={(v) => { resetCheck(); setKind(v as AuthKind); }}>
                 <SelectTrigger id="auth_kind">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="oauth">Claude subscription (Pro/Max) — sign in</SelectItem>
                   <SelectItem value="api_key">API key (console.anthropic.com)</SelectItem>
                   <SelectItem value="token">Claude Code token (`claude setup-token`)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           )}
-          {provider === "claude" && kind === "token" && (
-            <p className="rounded-lg bg-brand-soft px-3 py-2 text-xs text-brand-text">
-              Run <code className="font-mono">claude setup-token</code> in a terminal, then paste the long-lived token it prints. Claude Code issues it itself; Qanat only stores it.
-            </p>
-          )}
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="add-label">Name</Label>
-            <Input id="add-label" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Production account" required />
-          </div>
-          <div className="flex items-end gap-2">
-            <div className="flex flex-1 flex-col gap-1.5">
-              <Label htmlFor="add-credential">{kind === "api_key" ? "API key" : "Token"}</Label>
-              <Input
-                id="add-credential"
-                type="password"
-                value={credential}
-                onChange={(e) => { resetCheck(); setCredential(e.target.value); }}
-                placeholder={provider === "codex" ? "sk-…" : provider === "antigravity" ? "AIza…" : kind === "api_key" ? "sk-ant-…" : "the setup-token output"}
-                required
-              />
-            </div>
-            <Button type="button" variant="outline" onClick={handleCheck} disabled={!credential.trim() || check.isPending}>
-              {check.isPending ? (
-                <>
-                  <Loader2 className="me-1.5 size-4 animate-spin" /> Checking…
-                </>
-              ) : (
-                "Check"
+          {provider === "claude" && kind === "oauth" ? (
+            <OAuthSignIn
+              provider={provider}
+              providerName={providerName}
+              onDone={() => {
+                onOpenChange(false);
+                reset();
+                onSaved();
+              }}
+            />
+          ) : (
+            <>
+              {provider === "claude" && kind === "token" && (
+                <p className="rounded-lg bg-brand-soft px-3 py-2 text-xs text-brand-text">
+                  Run <code className="font-mono">claude setup-token</code> in a terminal, then paste the long-lived token it prints. Claude Code issues it itself; Qanat only stores it.
+                </p>
               )}
-            </Button>
-          </div>
-          <CheckBadge
-            state={check.data ? (check.data.ok ? "ok" : "bad") : check.isPending ? "loading" : check.error ? "bad" : "idle"}
-            message={check.data && !check.data.ok ? check.data.error : check.error ? errorMessage(check.error) : undefined}
-          />
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="add-base-url">Upstream base URL (optional)</Label>
-            <Input id="add-base-url" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="Default provider endpoint" />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="add-expires">Credential expires (optional)</Label>
-            <Input id="add-expires" type="datetime-local" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
-          </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="add-label">Name</Label>
+                <Input id="add-label" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Production account" required />
+              </div>
+              <div className="flex items-end gap-2">
+                <div className="flex flex-1 flex-col gap-1.5">
+                  <Label htmlFor="add-credential">{kind === "api_key" ? "API key" : "Token"}</Label>
+                  <Input
+                    id="add-credential"
+                    type="password"
+                    value={credential}
+                    onChange={(e) => { resetCheck(); setCredential(e.target.value); }}
+                    placeholder={provider === "codex" ? "sk-…" : provider === "antigravity" ? "AIza…" : kind === "api_key" ? "sk-ant-…" : "the setup-token output"}
+                    required
+                  />
+                </div>
+                <Button type="button" variant="outline" onClick={handleCheck} disabled={!credential.trim() || check.isPending}>
+                  {check.isPending ? (
+                    <>
+                      <Loader2 className="me-1.5 size-4 animate-spin" /> Checking…
+                    </>
+                  ) : (
+                    "Check"
+                  )}
+                </Button>
+              </div>
+              <CheckBadge
+                state={check.data ? (check.data.ok ? "ok" : "bad") : check.isPending ? "loading" : check.error ? "bad" : "idle"}
+                message={check.data && !check.data.ok ? check.data.error : check.error ? errorMessage(check.error) : undefined}
+              />
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="add-base-url">Upstream base URL (optional)</Label>
+                <Input id="add-base-url" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="Default provider endpoint" />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="add-expires">Credential expires (optional)</Label>
+                <Input id="add-expires" type="datetime-local" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
+              </div>
+            </>
+          )}
           <ProxyField id="add-proxy" value={proxy} onChange={setProxy} proxies={proxies} groups={groups} inherit={inherit} />
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={create.isPending || !label.trim() || !credential.trim()}>
-              {create.isPending ? "Connecting…" : "Connect account"}
-            </Button>
+            {kind !== "oauth" && (
+              <Button type="submit" disabled={create.isPending || !label.trim() || !credential.trim()}>
+                {create.isPending ? "Connecting…" : "Connect account"}
+              </Button>
+            )}
           </DialogFooter>
         </form>
       </DialogContent>
@@ -318,24 +495,33 @@ export function EditAccountDialog({
             <Label htmlFor="edit-label">Name</Label>
             <Input id="edit-label" value={label} onChange={(e) => setLabel(e.target.value)} required />
           </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="edit-credential">Replace credential</Label>
-            <Input
-              id="edit-credential"
-              type="password"
-              value={credential}
-              onChange={(e) => setCredential(e.target.value)}
-              placeholder="Leave blank to keep the stored credential"
-            />
-          </div>
+          {account?.auth_kind === "oauth" ? (
+            <p className="rounded-lg bg-brand-soft px-3 py-2 text-xs text-brand-text">
+              OAuth account — its tokens are managed by Qanat. If sign-in breaks, use the provider card to sign in again; Qanat refreshes the
+              existing account.
+            </p>
+          ) : (
+            <>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="edit-credential">Replace credential</Label>
+                <Input
+                  id="edit-credential"
+                  type="password"
+                  value={credential}
+                  onChange={(e) => setCredential(e.target.value)}
+                  placeholder="Leave blank to keep the stored credential"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="edit-expires">Credential expires</Label>
+                <Input id="edit-expires" type="datetime-local" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
+                <p className="text-xs text-muted-foreground">Clear the field to remove the expiry.</p>
+              </div>
+            </>
+          )}
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="edit-base-url">Upstream base URL</Label>
             <Input id="edit-base-url" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="Default provider endpoint" />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="edit-expires">Credential expires</Label>
-            <Input id="edit-expires" type="datetime-local" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
-            <p className="text-xs text-muted-foreground">Clear the field to remove the expiry.</p>
           </div>
           <ProxyField id="edit-proxy" value={proxy} onChange={setProxy} proxies={proxies} groups={groups} inherit={inherit} />
           <div className="flex items-center justify-between rounded-lg border px-3 py-2.5">

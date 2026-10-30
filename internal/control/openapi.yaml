@@ -214,6 +214,32 @@ paths:
           description: Result of the check; ok=false is still a 200
           content: { application/json: { schema: { $ref: "#/components/schemas/AccountTestResult" } } }
         "400": { $ref: "#/components/responses/Error" }
+  /api/admin/accounts/oauth/{provider}/authorize:
+    get:
+      operationId: oauthAuthorize
+      summary: Start a provider sign-in — returns the authorize URL to open; the pending sign-in is kept server-side
+      parameters:
+        - { name: provider, in: path, required: true, schema: { $ref: "#/components/schemas/Provider" } }
+        - { name: redirect_uri, in: query, required: true, schema: { type: string, description: The dashboard's http://localhost:<port>/callback URL } }
+      responses:
+        "200":
+          description: The URL to open
+          content: { application/json: { schema: { $ref: "#/components/schemas/OAuthAuthorizeResult" } } }
+        "400": { $ref: "#/components/responses/Error" }
+  /api/admin/accounts/oauth/{provider}/exchange:
+    post:
+      operationId: oauthExchange
+      summary: Finish a sign-in — swaps the code for sealed tokens and creates (or re-signs-in) the OAuth account
+      parameters:
+        - { name: provider, in: path, required: true, schema: { $ref: "#/components/schemas/Provider" } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/OAuthExchangeRequest" } } }
+      responses:
+        "200": { description: Existing account re-signed-in, content: { application/json: { schema: { $ref: "#/components/schemas/OAuthExchangeResult" } } } }
+        "201": { description: Account created, content: { application/json: { schema: { $ref: "#/components/schemas/OAuthExchangeResult" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
   /api/admin/accounts/{id}/test:
     post:
       operationId: testAccount
@@ -753,13 +779,16 @@ components:
         created_at: { type: string, format: date-time }
         auth_kind:
           type: string
-          enum: [token, api_key]
-          description: "token: sent upstream as a bearer token (e.g. a token from `claude setup-token`); api_key: sent as x-api-key. Codex and Antigravity only accept api_key"
+          enum: [oauth, token, api_key]
+          description: "oauth: signed in through the provider's own flow (sealed access + refresh tokens); token: sent upstream as a bearer token (e.g. a token from `claude setup-token`); api_key: sent as x-api-key. Codex and Antigravity accept oauth or api_key"
         expires_at: { type: [string, "null"], format: date-time, description: The credential's own expiry, when known }
         disabled_at: { type: [string, "null"], format: date-time, description: Set when an admin disabled the account; it takes no traffic }
         last_check_at: { type: [string, "null"], format: date-time, description: When the Test button last ran }
         last_check_ok: { type: [boolean, "null"], description: Result of the latest Test; 429 counts as valid }
         last_check_error: { type: [string, "null"] }
+        email: { type: [string, "null"], description: The OAuth identity the provider reported; null for key/token accounts }
+        last_refresh_at: { type: [string, "null"], format: date-time, description: When the OAuth tokens were last refreshed }
+        last_refresh_error: { type: [string, "null"], description: Why the last token refresh failed; a permanent error means sign in again }
         position: { type: integer, format: int64, description: Pool order; the gateway tries accounts top-down }
         proxy: { $ref: "#/components/schemas/AccountProxy" }
     CreateAccountRequest:
@@ -808,6 +837,26 @@ components:
         status: { type: integer, description: Upstream HTTP status, 0 on connection error }
         latency_ms: { type: integer, format: int64 }
         error: { type: string }
+    OAuthAuthorizeResult:
+      type: object
+      required: [auth_url, state, redirect_uri]
+      properties:
+        auth_url: { type: string, description: Open this in a popup; the provider redirects back to redirect_uri }
+        state: { type: string, description: Echoed back to the exchange endpoint }
+        redirect_uri: { type: string }
+    OAuthExchangeRequest:
+      type: object
+      required: [code, redirect_uri]
+      properties:
+        code: { type: string, description: The authorization code; may still carry "#state" the way Claude's redirect does }
+        state: { type: string, description: Empty when the state rode in as a "#fragment" on the code }
+        redirect_uri: { type: string }
+    OAuthExchangeResult:
+      type: object
+      required: [id, merged]
+      properties:
+        id: { type: string, description: The account ID }
+        merged: { type: boolean, description: True when an existing account for the same identity was re-signed-in }
     AccountProxy:
       type: string
       description: '"inherit" (next level of PRD §8.2: provider, then global default, else direct), "direct", a proxy ID, or "group:" + a proxy group ID'

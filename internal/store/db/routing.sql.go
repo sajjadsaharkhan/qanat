@@ -43,8 +43,8 @@ func (q *Queries) AccountPositions(ctx context.Context, provider string) ([]Acco
 }
 
 const createAccount = `-- name: CreateAccount :exec
-INSERT INTO provider_accounts (id, provider, label, base_url, credentials, auth_kind, expires_at, position, proxy_id, proxy_group_id, proxy_direct)
-VALUES ($1, $2, $3, $4, $5, $6, $7, (SELECT coalesce(max(position), 0) + 1 FROM provider_accounts), $8, $9, $10)
+INSERT INTO provider_accounts (id, provider, label, base_url, credentials, auth_kind, expires_at, email, position, proxy_id, proxy_group_id, proxy_direct)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, (SELECT coalesce(max(position), 0) + 1 FROM provider_accounts), $9, $10, $11)
 `
 
 type CreateAccountParams struct {
@@ -55,6 +55,7 @@ type CreateAccountParams struct {
 	Credentials  []byte
 	AuthKind     string
 	ExpiresAt    *time.Time
+	Email        *string
 	ProxyID      *string
 	ProxyGroupID *string
 	ProxyDirect  bool
@@ -69,6 +70,7 @@ func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) er
 		arg.Credentials,
 		arg.AuthKind,
 		arg.ExpiresAt,
+		arg.Email,
 		arg.ProxyID,
 		arg.ProxyGroupID,
 		arg.ProxyDirect,
@@ -107,6 +109,40 @@ func (q *Queries) DeleteOldUsage5m(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const findOAuthAccount = `-- name: FindOAuthAccount :many
+SELECT id FROM provider_accounts
+WHERE provider = $1 AND email = $2 AND email <> '' AND auth_kind = 'oauth'
+ORDER BY position
+LIMIT 1
+`
+
+type FindOAuthAccountParams struct {
+	Provider string
+	Email    *string
+}
+
+// OAuth sign-in dedup (like 9router's connection merge): a re-sign-in with the
+// same provider identity refreshes the existing account instead of adding one.
+func (q *Queries) FindOAuthAccount(ctx context.Context, arg FindOAuthAccountParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, findOAuthAccount, arg.Provider, arg.Email)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getAccountAdmin = `-- name: GetAccountAdmin :one
@@ -210,30 +246,34 @@ const listAccounts = `-- name: ListAccounts :many
 
 SELECT id, provider, label, base_url, (credentials IS NOT NULL)::boolean AS has_credentials, state, cooldown_until, created_at,
        auth_kind, expires_at, disabled_at, last_check_at, last_check_ok, last_check_error, position,
+       email, last_refresh_at, last_refresh_error,
        proxy_id, proxy_group_id, proxy_direct
 FROM provider_accounts
 ORDER BY position
 `
 
 type ListAccountsRow struct {
-	ID             string
-	Provider       string
-	Label          string
-	BaseUrl        *string
-	HasCredentials bool
-	State          string
-	CooldownUntil  *time.Time
-	CreatedAt      time.Time
-	AuthKind       string
-	ExpiresAt      *time.Time
-	DisabledAt     *time.Time
-	LastCheckAt    *time.Time
-	LastCheckOk    pgtype.Bool
-	LastCheckError *string
-	Position       pgtype.Int8
-	ProxyID        *string
-	ProxyGroupID   *string
-	ProxyDirect    bool
+	ID               string
+	Provider         string
+	Label            string
+	BaseUrl          *string
+	HasCredentials   bool
+	State            string
+	CooldownUntil    *time.Time
+	CreatedAt        time.Time
+	AuthKind         string
+	ExpiresAt        *time.Time
+	DisabledAt       *time.Time
+	LastCheckAt      *time.Time
+	LastCheckOk      pgtype.Bool
+	LastCheckError   *string
+	Position         pgtype.Int8
+	Email            *string
+	LastRefreshAt    *time.Time
+	LastRefreshError *string
+	ProxyID          *string
+	ProxyGroupID     *string
+	ProxyDirect      bool
 }
 
 // Admin API: provider accounts, model mapping, prices (PRD §6, §10.1).
@@ -262,6 +302,9 @@ func (q *Queries) ListAccounts(ctx context.Context) ([]ListAccountsRow, error) {
 			&i.LastCheckOk,
 			&i.LastCheckError,
 			&i.Position,
+			&i.Email,
+			&i.LastRefreshAt,
+			&i.LastRefreshError,
 			&i.ProxyID,
 			&i.ProxyGroupID,
 			&i.ProxyDirect,
@@ -364,6 +407,33 @@ func (q *Queries) ListPrices(ctx context.Context) ([]ListPricesRow, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const mergeOAuthAccount = `-- name: MergeOAuthAccount :execrows
+UPDATE provider_accounts
+SET credentials = $2, expires_at = $3, auth_kind = 'oauth', email = $4,
+    state = 'healthy', cooldown_until = NULL, disabled_at = NULL
+WHERE id = $1
+`
+
+type MergeOAuthAccountParams struct {
+	ID          string
+	Credentials []byte
+	ExpiresAt   *time.Time
+	Email       *string
+}
+
+func (q *Queries) MergeOAuthAccount(ctx context.Context, arg MergeOAuthAccountParams) (int64, error) {
+	result, err := q.db.Exec(ctx, mergeOAuthAccount,
+		arg.ID,
+		arg.Credentials,
+		arg.ExpiresAt,
+		arg.Email,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setAccountCheckResult = `-- name: SetAccountCheckResult :exec

@@ -336,6 +336,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/accounts/oauth/{provider}/authorize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Start a provider sign-in — returns the authorize URL to open; the pending sign-in is kept server-side */
+        get: operations["oauthAuthorize"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/accounts/oauth/{provider}/exchange": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Finish a sign-in — swaps the code for sealed tokens and creates (or re-signs-in) the OAuth account */
+        post: operations["oauthExchange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/accounts/{id}/test": {
         parameters: {
             query?: never;
@@ -911,10 +945,10 @@ export interface components {
             /** Format: date-time */
             created_at: string;
             /**
-             * @description token: sent upstream as a bearer token (e.g. a token from `claude setup-token`); api_key: sent as x-api-key. Codex and Antigravity only accept api_key
+             * @description oauth: signed in through the provider's own flow (sealed access + refresh tokens); token: sent upstream as a bearer token (e.g. a token from `claude setup-token`); api_key: sent as x-api-key. Codex and Antigravity accept oauth or api_key
              * @enum {string}
              */
-            auth_kind: "token" | "api_key";
+            auth_kind: "oauth" | "token" | "api_key";
             /**
              * Format: date-time
              * @description The credential's own expiry
@@ -933,6 +967,15 @@ export interface components {
             /** @description Result of the latest Test; 429 counts as valid */
             last_check_ok: boolean | null;
             last_check_error: string | null;
+            /** @description The OAuth identity the provider reported; null for key/token accounts */
+            email?: string | null;
+            /**
+             * Format: date-time
+             * @description When the OAuth tokens were last refreshed
+             */
+            last_refresh_at?: string | null;
+            /** @description Why the last token refresh failed; a permanent error means sign in again */
+            last_refresh_error?: string | null;
             /**
              * Format: int64
              * @description Pool order; the gateway tries accounts top-down
@@ -990,6 +1033,26 @@ export interface components {
             /** Format: int64 */
             latency_ms: number;
             error?: string;
+        };
+        OAuthAuthorizeResult: {
+            /** @description Open this in a popup; the provider redirects back to redirect_uri */
+            auth_url: string;
+            /** @description Echoed back to the exchange endpoint */
+            state: string;
+            redirect_uri: string;
+        };
+        OAuthExchangeRequest: {
+            /** @description The authorization code; may still carry "#state" the way Claude's redirect does */
+            code: string;
+            /** @description Empty when the state rode in as a "#fragment" on the code */
+            state?: string;
+            redirect_uri: string;
+        };
+        OAuthExchangeResult: {
+            /** @description The account ID */
+            id: string;
+            /** @description True when an existing account for the same identity was re-signed-in */
+            merged: boolean;
         };
         /** @description "inherit" (next level of PRD §8.2: provider, then global default, else direct), "direct", a proxy ID, or "group:" + a proxy group ID */
         AccountProxy: string;
@@ -1731,6 +1794,68 @@ export interface operations {
                 };
             };
             400: components["responses"]["Error"];
+        };
+    };
+    oauthAuthorize: {
+        parameters: {
+            query: {
+                redirect_uri: string;
+            };
+            header?: never;
+            path: {
+                provider: components["schemas"]["Provider"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The URL to open */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthAuthorizeResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+        };
+    };
+    oauthExchange: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: components["schemas"]["Provider"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OAuthExchangeRequest"];
+            };
+        };
+        responses: {
+            /** @description Existing account re-signed-in */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthExchangeResult"];
+                };
+            };
+            /** @description Account created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthExchangeResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            502: components["responses"]["Error"];
         };
     };
     testAccount: {

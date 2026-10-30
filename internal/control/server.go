@@ -13,6 +13,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -70,6 +71,10 @@ type Server struct {
 	opts Options
 	oidc *OIDCClient
 	now  func() time.Time
+	// oauthMu guards oauthPending, the in-flight provider sign-ins
+	// (internal/control/oauth.go).
+	oauthMu      sync.Mutex
+	oauthPending map[string]oauthPendingEntry
 }
 
 // New builds the Admin API.
@@ -81,7 +86,8 @@ func New(pg *pgxpool.Pool, rdb *redis.Client, log *slog.Logger, opts Options) *S
 	if opts.OIDCIssuer != "" {
 		oidcClient = newOIDCClient(opts.OIDCIssuer, opts.OIDCInternalURL, opts.OIDCClientID, opts.OIDCClientSecret)
 	}
-	return &Server{pg: pg, q: db.New(pg), rdb: rdb, log: log, opts: opts, oidc: oidcClient, now: time.Now}
+	return &Server{pg: pg, q: db.New(pg), rdb: rdb, log: log, opts: opts, oidc: oidcClient, now: time.Now,
+		oauthPending: map[string]oauthPendingEntry{}}
 }
 
 // Bootstrap prepares state the API relies on: the root user when enabled.
@@ -136,6 +142,8 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.Handle("POST /api/admin/accounts/{id}/test", admin(s.testAccount))
 	mux.Handle("POST /api/admin/accounts/{id}/move", admin(s.moveAccount))
 	mux.Handle("POST /api/admin/accounts/validate", admin(s.validateAccount))
+	mux.Handle("GET /api/admin/accounts/oauth/{provider}/authorize", admin(s.oauthAuthorize))
+	mux.Handle("POST /api/admin/accounts/oauth/{provider}/exchange", admin(s.oauthExchange))
 	mux.Handle("GET /api/admin/proxies", admin(s.listProxies))
 	mux.Handle("POST /api/admin/proxies", admin(s.createProxy))
 	mux.Handle("PUT /api/admin/proxies/{id}", admin(s.updateProxy))

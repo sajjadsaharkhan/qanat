@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"qanat/internal/core/oauth"
 	"qanat/internal/core/quota"
 	"qanat/internal/core/usage"
 	"qanat/internal/protocol"
@@ -225,9 +226,10 @@ func (g *Gateway) send(r *http.Request, a *Account, sp *proxy.Spec, body []byte)
 		}
 	}
 	// Auth by the account's kind (migration 0007): an API key uses Anthropic's
-	// x-api-key form, everything else (a stored base-URL token, or a token
-	// from `claude setup-token`) is a bearer token. anthropic-* headers pass
-	// through from the caller, so only fill the version in when absent.
+	// x-api-key form, everything else (a stored base-URL token, a token from
+	// `claude setup-token`, an OAuth access token) is a bearer token.
+	// anthropic-* headers pass through from the caller, so only fill the
+	// version in when absent.
 	if a.AuthKind == "api_key" {
 		req.Header.Set("X-Api-Key", a.Token)
 		if req.Header.Get("anthropic-version") == "" {
@@ -235,6 +237,21 @@ func (g *Gateway) send(r *http.Request, a *Account, sp *proxy.Spec, body []byte)
 		}
 	} else if a.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+a.Token)
+		// OAuth accounts (migration 0008) authenticate as the Claude Code CLI
+		// subscription they came from: the oauth beta must ride along, and a
+		// caller without a UA gets the CLI's.
+		if a.AuthKind == "oauth" {
+			if beta := req.Header.Get("anthropic-beta"); !strings.Contains(beta, oauth.OAuthBeta) {
+				if beta == "" {
+					req.Header.Set("anthropic-beta", oauth.OAuthBeta)
+				} else {
+					req.Header.Set("anthropic-beta", beta+","+oauth.OAuthBeta)
+				}
+			}
+			if req.Header.Get("User-Agent") == "" {
+				req.Header.Set("User-Agent", oauth.ClaudeUserAgent)
+			}
+		}
 	}
 	req.ContentLength = int64(len(body))
 	return g.proxies.Client(sp).Do(withConnectTrace(req, sp))

@@ -87,7 +87,7 @@ export function ConnectionRow({
   const disabled = !!account.disabled_at;
   const cooldown = account.state === "cooldown" && account.cooldown_until && new Date(account.cooldown_until) > new Date();
   const hasProxy = account.proxy !== "inherit";
-  const kind = account.auth_kind === "api_key" ? "API key" : "Token";
+  const kind = account.auth_kind === "api_key" ? "API key" : account.auth_kind === "oauth" ? "OAuth" : "Token";
 
   const handleProxy = (value: string) => {
     setProxy.mutate(
@@ -199,7 +199,17 @@ export function ConnectionRow({
             {account.expires_at && new Date(account.expires_at) < new Date() && (
               <Badge variant="destructive">expired</Badge>
             )}
+            {account.last_refresh_error && (
+              <span className="max-w-[300px] truncate text-xs text-destructive-text" title={account.last_refresh_error}>
+                {account.last_refresh_error}
+              </span>
+            )}
             <span className="text-xs text-muted-foreground">{kind}</span>
+            {account.email && (
+              <span className="max-w-[220px] truncate text-xs text-muted-foreground" title={account.email}>
+                {account.email}
+              </span>
+            )}
             {account.base_url && (
               <span className="max-w-[260px] truncate font-mono text-xs text-muted-foreground" title={account.base_url}>
                 {account.base_url.replace(/^https?:\/\//, "")}

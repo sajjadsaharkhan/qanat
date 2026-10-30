@@ -109,24 +109,27 @@ type PlanQuota struct {
 }
 
 type ProviderAccount struct {
-	ID             string
-	Provider       string
-	Label          string
-	BaseUrl        *string
-	Credentials    []byte
-	State          string
-	CooldownUntil  *time.Time
-	Position       pgtype.Int8
-	CreatedAt      time.Time
-	ProxyID        *string
-	ProxyDirect    bool
-	ProxyGroupID   *string
-	AuthKind       string
-	ExpiresAt      *time.Time
-	DisabledAt     *time.Time
-	LastCheckAt    *time.Time
-	LastCheckOk    pgtype.Bool
-	LastCheckError *string
+	ID               string
+	Provider         string
+	Label            string
+	BaseUrl          *string
+	Credentials      []byte
+	State            string
+	CooldownUntil    *time.Time
+	Position         pgtype.Int8
+	CreatedAt        time.Time
+	ProxyID          *string
+	ProxyDirect      bool
+	ProxyGroupID     *string
+	AuthKind         string
+	ExpiresAt        *time.Time
+	DisabledAt       *time.Time
+	LastCheckAt      *time.Time
+	LastCheckOk      pgtype.Bool
+	LastCheckError   *string
+	Email            *string
+	LastRefreshAt    *time.Time
+	LastRefreshError *string
 }
 
 type ProviderProxy struct {
