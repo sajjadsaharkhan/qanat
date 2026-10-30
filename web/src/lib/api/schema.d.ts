@@ -571,6 +571,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/provider-routing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** How the gateway picks among each provider's accounts; providers without a setting show the defaults */
+        get: operations["listProviderRouting"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/provider-routing/{provider}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["setProviderRouting"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/mappings": {
         parameters: {
             query?: never;
@@ -1401,6 +1434,20 @@ export interface components {
             label: string;
             policy: components["schemas"]["ProxyGroupPolicy"];
             members: string[];
+        };
+        ProviderRoutingRequest: {
+            /**
+             * @description sticky-balanced: each user stays on one account (its prompt cache stays warm); new users and users idle past the cache lifetime go to the least-loaded account, weighted by quota left. round-robin: each user keeps an account for sticky_limit requests, then moves to the least recently used one. fill-first: pool order, the user's last good account first
+             * @enum {string}
+             */
+            strategy: "sticky-balanced" | "round-robin" | "fill-first";
+            /** @description Requests in a row on one account before rotating (round-robin only) */
+            sticky_limit: number;
+            /** @description Accounts with less subscription quota left than this are tried last */
+            min_headroom_pct: number;
+        };
+        ProviderRouting: components["schemas"]["ProviderRoutingRequest"] & {
+            provider: components["schemas"]["Provider"];
         };
         ProviderProxy: {
             provider: components["schemas"]["Provider"];
@@ -2554,6 +2601,54 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    listProviderRouting: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One entry per provider */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderRouting"][];
+                };
+            };
+        };
+    };
+    setProviderRouting: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: components["schemas"]["Provider"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProviderRoutingRequest"];
+            };
+        };
+        responses: {
+            /** @description Saved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderRouting"];
+                };
             };
             400: components["responses"]["Error"];
             404: components["responses"]["Error"];

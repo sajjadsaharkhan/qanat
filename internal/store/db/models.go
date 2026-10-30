@@ -146,6 +146,13 @@ type ProviderProxy struct {
 	ProxyDirect  bool
 }
 
+type ProviderRouting struct {
+	Provider       string
+	Strategy       string
+	StickyLimit    int32
+	MinHeadroomPct int32
+}
+
 type Proxy struct {
 	ID        string
 	Label     string

@@ -471,6 +471,36 @@ func (q *Queries) SnapshotProviderProxies(ctx context.Context) ([]ProviderProxy,
 	return items, nil
 }
 
+const snapshotProviderRouting = `-- name: SnapshotProviderRouting :many
+SELECT provider, strategy, sticky_limit, min_headroom_pct
+FROM provider_routing
+`
+
+func (q *Queries) SnapshotProviderRouting(ctx context.Context) ([]ProviderRouting, error) {
+	rows, err := q.db.Query(ctx, snapshotProviderRouting)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ProviderRouting{}
+	for rows.Next() {
+		var i ProviderRouting
+		if err := rows.Scan(
+			&i.Provider,
+			&i.Strategy,
+			&i.StickyLimit,
+			&i.MinHeadroomPct,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const snapshotProxies = `-- name: SnapshotProxies :many
 SELECT id, type, host, port, username, password, enabled, is_default
 FROM proxies

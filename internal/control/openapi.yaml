@@ -404,6 +404,25 @@ paths:
         "204": { description: Updated }
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /api/admin/provider-routing:
+    get:
+      operationId: listProviderRouting
+      summary: How the gateway picks among each provider's accounts; providers without a setting show the defaults
+      responses:
+        "200":
+          description: One entry per provider
+          content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/ProviderRouting" } } } }
+  /api/admin/provider-routing/{provider}:
+    put:
+      operationId: setProviderRouting
+      parameters: [{ name: provider, in: path, required: true, schema: { $ref: "#/components/schemas/Provider" } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ProviderRoutingRequest" } } }
+      responses:
+        "200": { description: Saved, content: { application/json: { schema: { $ref: "#/components/schemas/ProviderRouting" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /api/admin/mappings:
     get:
       operationId: listMappings
@@ -1132,6 +1151,23 @@ components:
         label: { type: string }
         policy: { $ref: "#/components/schemas/ProxyGroupPolicy" }
         members: { type: array, items: { type: string }, minItems: 1 }
+    ProviderRoutingRequest:
+      type: object
+      required: [strategy, sticky_limit, min_headroom_pct]
+      properties:
+        strategy:
+          type: string
+          enum: [sticky-balanced, round-robin, fill-first]
+          description: "sticky-balanced: each user stays on one account (its prompt cache stays warm); new users and users idle past the cache lifetime go to the least-loaded account, weighted by quota left. round-robin: each user keeps an account for sticky_limit requests, then moves to the least recently used one. fill-first: pool order, the user's last good account first"
+        sticky_limit: { type: integer, minimum: 1, maximum: 1000, description: Requests in a row on one account before rotating (round-robin only) }
+        min_headroom_pct: { type: integer, minimum: 0, maximum: 100, description: Accounts with less subscription quota left than this are tried last }
+    ProviderRouting:
+      allOf:
+        - { $ref: "#/components/schemas/ProviderRoutingRequest" }
+        - type: object
+          required: [provider]
+          properties:
+            provider: { $ref: "#/components/schemas/Provider" }
     ProviderProxy:
       type: object
       required: [provider, proxy]

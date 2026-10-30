@@ -22,6 +22,7 @@ import { Checkbox, Menu, MenuContent, MenuItem, MenuLabel, MenuTrigger, Tabs, Ta
 import { useNow } from "@/components/qanat/accounts/limit-bars";
 import { headroom, nextReset, supportsLimits, useAccountLimits, type Account } from "@/components/qanat/accounts/limits";
 import { PoolSummaryCard } from "@/components/qanat/accounts/pool-summary";
+import { RoutingButton } from "@/components/qanat/accounts/routing-dialog";
 import antigravityLogo from "@/components/qanat/usage-overview/logos/antigravity.png";
 import claudeLogo from "@/components/qanat/usage-overview/logos/claude.png";
 import codexLogo from "@/components/qanat/usage-overview/logos/codex.png";
@@ -100,6 +101,7 @@ function Accounts() {
   const proxies = api.useQuery("get", "/api/admin/proxies");
   const groups = api.useQuery("get", "/api/admin/proxy-groups");
   const providerProxies = api.useQuery("get", "/api/admin/provider-proxies");
+  const routing = api.useQuery("get", "/api/admin/provider-routing");
   const proxyList = proxies.data ?? [];
   const groupList = groups.data ?? [];
   const inheritFor = (p: string) => {
@@ -349,6 +351,7 @@ function Accounts() {
                 byId={limits.byId}
                 now={now}
                 onSelect={tab === "all" ? () => setTab(p.id) : undefined}
+                footer={<RoutingButton routing={routing.data?.find((r) => r.provider === p.id)} providerName={p.name} />}
               />
             ))}
           </div>

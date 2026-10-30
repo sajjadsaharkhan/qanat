@@ -53,9 +53,11 @@ func main() {
 
 	pub := gateway.NewPublisher(rdb, log)
 	gw := gateway.New(snap, quota.NewStore(rdb), pub, pg, log, cfg.TestMode)
+	gw.UseRedis(rdb)
 
 	go gw.RunProxyHealth(watchCtx, rdb)
 	go gw.RunNetStats(watchCtx, rdb)
+	go gw.RunHeadroom(watchCtx, rdb)
 
 	mux := http.NewServeMux()
 	gw.Register(mux)

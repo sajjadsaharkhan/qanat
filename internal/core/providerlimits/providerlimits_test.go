@@ -180,3 +180,25 @@ func TestSupported(t *testing.T) {
 		}
 	}
 }
+
+func TestHeadroom(t *testing.T) {
+	s := &Snapshot{Windows: []Window{
+		{Key: "session", Group: GroupSession, UsedPercent: 30},
+		{Key: "weekly", Group: GroupWeekly, UsedPercent: 92},
+		{Key: "weekly_opus", Group: GroupModel, UsedPercent: 100},
+	}}
+	if left, ok := s.Headroom(); !ok || left != 8 {
+		t.Fatalf("tightest account-wide window: %v %v", left, ok)
+	}
+	s.LimitReached = true
+	if left, ok := s.Headroom(); !ok || left != 0 {
+		t.Fatalf("limit reached: %v %v", left, ok)
+	}
+	models := &Snapshot{Windows: []Window{{Group: GroupModel, UsedPercent: 40}, {Group: GroupModel, UsedPercent: 10}, {Group: GroupModel, UsedPercent: 99}}}
+	if left, ok := models.Headroom(); !ok || left != 60 {
+		t.Fatalf("model-only: %v %v", left, ok)
+	}
+	if _, ok := (&Snapshot{}).Headroom(); ok {
+		t.Fatal("no windows means unknown")
+	}
+}

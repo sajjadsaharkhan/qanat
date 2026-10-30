@@ -39,8 +39,9 @@ type Snapshot struct {
 	// providerModels is each provider's stored catalog (migration 0009),
 	// synced from the provider itself; /v1/models lists these prefixed.
 	providerModels map[string][]string
-	sticky         map[string]string // user|provider → account ID
-	proxyIDs       map[string]bool   // proxies some account routes through
+	sticky         map[string]string  // user|provider → account ID
+	proxyIDs       map[string]bool    // proxies some account routes through
+	routing        map[string]Routing // provider → how its accounts are picked (migration 0012)
 }
 
 // Key is a personal API key (hash lookup only).
@@ -247,6 +248,7 @@ func build(ctx context.Context, q *db.Queries, box *secretbox.Box, log *slog.Log
 		LoadedAt: time.Now(), keys: map[[32]byte]*Key{}, users: map[string]*User{}, plans: map[string]*Plan{},
 		grants: map[string]int64{}, exact: map[string]Target{}, prices: map[string]Price{},
 		accounts: map[string][]*Account{}, providerModels: map[string][]string{}, sticky: map[string]string{}, proxyIDs: map[string]bool{},
+		routing: map[string]Routing{},
 	}
 	var err error
 	if s.Gen, err = q.SnapshotGeneration(ctx); err != nil {
@@ -483,6 +485,14 @@ func build(ctx context.Context, q *db.Queries, box *secretbox.Box, log *slog.Log
 	}
 	for _, b := range sticky {
 		s.sticky[b.UserID+"|"+b.Provider] = b.AccountID
+	}
+
+	routing, err := q.SnapshotProviderRouting(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range routing {
+		s.routing[r.Provider] = Routing{Strategy: r.Strategy, StickyLimit: int(r.StickyLimit), MinHeadroomPct: float64(r.MinHeadroomPct)}
 	}
 
 	catalog, err := q.SnapshotProviderModels(ctx)

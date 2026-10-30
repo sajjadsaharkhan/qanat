@@ -55,6 +55,7 @@ type Gateway struct {
 	mu       sync.Mutex
 	cooldown map[string]time.Time // account ID → until
 	sticky   map[string]string    // user|provider → account ID
+	bal      *balancer            // round-robin state and account headroom (balance.go)
 }
 
 // New wires the gateway.

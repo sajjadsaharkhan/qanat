@@ -185,3 +185,12 @@ WHERE id = $1 AND (last_used_at IS NULL OR last_used_at < $2);
 
 -- name: DeleteOldUsage5m :execrows
 DELETE FROM usage_5m WHERE bucket_start < now() - interval '7 days';
+
+-- name: ListProviderRouting :many
+SELECT provider, strategy, sticky_limit, min_headroom_pct FROM provider_routing ORDER BY provider;
+
+-- name: SetProviderRouting :exec
+INSERT INTO provider_routing (provider, strategy, sticky_limit, min_headroom_pct)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (provider) DO UPDATE
+SET strategy = EXCLUDED.strategy, sticky_limit = EXCLUDED.sticky_limit, min_headroom_pct = EXCLUDED.min_headroom_pct;

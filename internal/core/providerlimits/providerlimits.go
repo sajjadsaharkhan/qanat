@@ -655,3 +655,30 @@ func projectID(raw json.RawMessage) string {
 	}
 	return ""
 }
+
+// Headroom is the percent left in the account's tightest account-wide
+// window (session or weekly; the first two windows when the provider only
+// reports per-model ones). ok is false when nothing is known. A reported
+// limit_reached means no headroom.
+func (s *Snapshot) Headroom() (left float64, ok bool) {
+	var ws []Window
+	for _, w := range s.Windows {
+		if w.Group != GroupModel {
+			ws = append(ws, w)
+		}
+	}
+	if len(ws) == 0 {
+		ws = s.Windows[:min(2, len(s.Windows))]
+	}
+	if len(ws) == 0 {
+		return 0, false
+	}
+	used := 0.0
+	for _, w := range ws {
+		used = max(used, w.UsedPercent)
+	}
+	if s.LimitReached {
+		return 0, true
+	}
+	return 100 - used, true
+}

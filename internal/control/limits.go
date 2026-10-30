@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"golang.org/x/sync/singleflight"
@@ -49,6 +50,9 @@ type limitsEntry struct {
 	FetchedAt time.Time               `json:"fetched_at"`
 }
 
+// HeadroomKey is the Redis hash the gateway reads account headroom from.
+const HeadroomKey = "qanat:account-headroom"
+
 func limitsKey(id string) string         { return "qanat:provider-limits:" + id }
 func limitsCooldownKey(id string) string { return "qanat:provider-limits-cooldown:" + id }
 
@@ -87,7 +91,8 @@ func (s *Server) accountLimits(w http.ResponseWriter, r *http.Request, _ *db.Get
 }
 
 // loadLimits returns the account's limits: the cached read when it's younger
-// than maxAge, else a fresh one from the provider (stored). When the provider can't be read it returns the
+// than maxAge, else a fresh one from the provider (stored, and its headroom
+// published for the gateway). When the provider can't be read it returns the
 // last good read with stale set and msg saying why.
 func (s *Server) loadLimits(ctx context.Context, a db.GetAccountAdminRow, maxAge time.Duration) (entry *limitsEntry, stale bool, msg string) {
 	cached := s.cachedLimits(ctx, a.ID)
@@ -119,7 +124,20 @@ func (s *Server) loadLimits(ctx context.Context, a db.GetAccountAdminRow, maxAge
 	if b, err := json.Marshal(entry); err == nil {
 		_ = s.rdb.Set(ctx, limitsKey(a.ID), b, limitsKeep).Err()
 	}
+	s.publishHeadroom(ctx, a.ID, entry)
 	return entry, false, ""
+}
+
+// publishHeadroom tells the gateway how much quota the account has left
+// (provider_routing's min_headroom_pct): "<percent left>|<unix seconds>" in
+// one Redis hash. An account that reports no windows is removed.
+func (s *Server) publishHeadroom(ctx context.Context, id string, e *limitsEntry) {
+	left, ok := e.Snapshot.Headroom()
+	if !ok {
+		_ = s.rdb.HDel(ctx, HeadroomKey, id).Err()
+		return
+	}
+	_ = s.rdb.HSet(ctx, HeadroomKey, id, strconv.FormatFloat(left, 'f', 2, 64)+"|"+strconv.FormatInt(e.FetchedAt.Unix(), 10)).Err()
 }
 
 // fetchLimits reads the account's limits upstream. An OAuth token the

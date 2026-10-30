@@ -89,3 +89,7 @@ ORDER BY g.id, m.priority, m.proxy_id;
 -- name: SnapshotProviderProxies :many
 SELECT provider, proxy_id, proxy_group_id, proxy_direct
 FROM provider_proxies;
+
+-- name: SnapshotProviderRouting :many
+SELECT provider, strategy, sticky_limit, min_headroom_pct
+FROM provider_routing;

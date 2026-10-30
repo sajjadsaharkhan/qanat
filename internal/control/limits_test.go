@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -48,12 +49,17 @@ func TestAccountLimits_CacheForceCooldown(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		h.s.rdb.Del(context.Background(), limitsKey(acct.ID), limitsCooldownKey(acct.ID))
+		h.s.rdb.HDel(context.Background(), HeadroomKey, acct.ID)
 	})
 
 	path := "/api/admin/accounts/" + acct.ID + "/limits"
 	var res accountLimitsResponse
 	if st := h.do(c, "GET", path, "", &res); st != 200 || !res.Supported || res.Stale || res.FetchedAt == nil || len(res.Windows) != 2 || res.Windows[0].UsedPercent != 25 {
 		t.Fatalf("first read: %d %+v", st, res)
+	}
+	// The read is published for the gateway: the tightest window (weekly, 60% used).
+	if v := h.s.rdb.HGet(context.Background(), HeadroomKey, acct.ID).Val(); !strings.HasPrefix(v, "40.00|") {
+		t.Fatalf("published headroom: %q", v)
 	}
 	h.do(c, "GET", path, "", &res)
 	if hits.Load() != 1 {
@@ -80,5 +86,49 @@ func TestAccountLimits_CacheForceCooldown(t *testing.T) {
 	}
 	if st := h.do(c, "GET", "/api/admin/accounts/00000000-0000-0000-0000-000000000000/limits", "", nil); st != 404 {
 		t.Fatalf("unknown account: %d", st)
+	}
+}
+
+// Provider routing: defaults without a row, validation, and a saved setting.
+func TestProviderRouting(t *testing.T) {
+	h := newHarness(t)
+	c := h.signInRoot()
+	h.s.pg.Exec(context.Background(), `DELETE FROM provider_routing`)
+	t.Cleanup(func() { h.s.pg.Exec(context.Background(), `DELETE FROM provider_routing`) })
+
+	var list []providerRoutingResponse
+	if st := h.do(c, "GET", "/api/admin/provider-routing", "", &list); st != 200 || len(list) != 3 {
+		t.Fatalf("list: %d %+v", st, list)
+	}
+	for _, r := range list {
+		if r.Strategy != "sticky-balanced" || r.StickyLimit != 3 || r.MinHeadroomPct != 5 {
+			t.Fatalf("defaults: %+v", r)
+		}
+	}
+	for _, bad := range []string{
+		`{"strategy":"random","sticky_limit":3,"min_headroom_pct":5}`,
+		`{"strategy":"round-robin","sticky_limit":0,"min_headroom_pct":5}`,
+		`{"strategy":"round-robin","sticky_limit":3,"min_headroom_pct":101}`,
+	} {
+		if st := h.do(c, "PUT", "/api/admin/provider-routing/claude", bad, nil); st != 400 {
+			t.Fatalf("%s: %d", bad, st)
+		}
+	}
+	if st := h.do(c, "PUT", "/api/admin/provider-routing/nope", `{"strategy":"fill-first","sticky_limit":1,"min_headroom_pct":0}`, nil); st != 404 {
+		t.Fatalf("unknown provider: %d", st)
+	}
+	if st := h.do(c, "PUT", "/api/admin/provider-routing/claude", `{"strategy":"round-robin","sticky_limit":3,"min_headroom_pct":5}`, nil); st != 200 {
+		t.Fatalf("round-robin: %d", st)
+	}
+	var saved providerRoutingResponse
+	if st := h.do(c, "PUT", "/api/admin/provider-routing/codex", `{"strategy":"fill-first","sticky_limit":10,"min_headroom_pct":15}`, &saved); st != 200 || saved.Strategy != "fill-first" {
+		t.Fatalf("save: %d %+v", st, saved)
+	}
+	list = nil
+	h.do(c, "GET", "/api/admin/provider-routing", "", &list)
+	for _, r := range list {
+		if r.Provider == "codex" && (r.Strategy != "fill-first" || r.StickyLimit != 10 || r.MinHeadroomPct != 15) {
+			t.Fatalf("after save: %+v", r)
+		}
 	}
 }

@@ -565,6 +565,35 @@ func (q *Queries) ListProviderModels(ctx context.Context, provider string) ([]st
 	return items, nil
 }
 
+const listProviderRouting = `-- name: ListProviderRouting :many
+SELECT provider, strategy, sticky_limit, min_headroom_pct FROM provider_routing ORDER BY provider
+`
+
+func (q *Queries) ListProviderRouting(ctx context.Context) ([]ProviderRouting, error) {
+	rows, err := q.db.Query(ctx, listProviderRouting)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ProviderRouting{}
+	for rows.Next() {
+		var i ProviderRouting
+		if err := rows.Scan(
+			&i.Provider,
+			&i.Strategy,
+			&i.StickyLimit,
+			&i.MinHeadroomPct,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const mergeOAuthAccount = `-- name: MergeOAuthAccount :execrows
 UPDATE provider_accounts
 SET credentials = $2, expires_at = $3, auth_kind = 'oauth', email = $4,
@@ -728,6 +757,30 @@ func (q *Queries) SetOAuthRefreshed(ctx context.Context, arg SetOAuthRefreshedPa
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const setProviderRouting = `-- name: SetProviderRouting :exec
+INSERT INTO provider_routing (provider, strategy, sticky_limit, min_headroom_pct)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (provider) DO UPDATE
+SET strategy = EXCLUDED.strategy, sticky_limit = EXCLUDED.sticky_limit, min_headroom_pct = EXCLUDED.min_headroom_pct
+`
+
+type SetProviderRoutingParams struct {
+	Provider       string
+	Strategy       string
+	StickyLimit    int32
+	MinHeadroomPct int32
+}
+
+func (q *Queries) SetProviderRouting(ctx context.Context, arg SetProviderRoutingParams) error {
+	_, err := q.db.Exec(ctx, setProviderRouting,
+		arg.Provider,
+		arg.Strategy,
+		arg.StickyLimit,
+		arg.MinHeadroomPct,
+	)
+	return err
 }
 
 const touchKey = `-- name: TouchKey :exec

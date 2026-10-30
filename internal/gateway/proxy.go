@@ -156,7 +156,7 @@ func (g *Gateway) forward(w http.ResponseWriter, r *http.Request, rt *route, o f
 		if m.Model != rt.name { // REQ-PASS-03: only the model value changes
 			body = protocol.ReplaceRange(rt.body, rt.mStart, rt.mEnd, m.Model)
 		}
-		for _, a := range g.candidates(rt.snap, rt.user.ID, m.Provider) {
+		for _, a := range g.order(r.Context(), rt, m.Provider, g.candidates(rt.snap, rt.user.ID, m.Provider)) {
 			tried++
 			attempt := time.Now()
 			// A failover group's next member is tried before the next account
@@ -204,7 +204,7 @@ func (g *Gateway) forward(w http.ResponseWriter, r *http.Request, rt *route, o f
 				resp.Body.Close()
 				continue
 			}
-			g.bindSticky(rt, m.Provider, a.ID)
+			g.served(rt, m.Provider, a.ID)
 			g.stream(w, r, rt, o, m, a, sp, resp, attempt, endpoint)
 			return
 		}

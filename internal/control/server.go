@@ -159,6 +159,8 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.Handle("DELETE /api/admin/proxy-groups/{id}", admin(s.deleteProxyGroup))
 	mux.Handle("GET /api/admin/provider-proxies", admin(s.listProviderProxies))
 	mux.Handle("PUT /api/admin/provider-proxies/{provider}", admin(s.setProviderProxy))
+	mux.Handle("GET /api/admin/provider-routing", admin(s.listProviderRouting))
+	mux.Handle("PUT /api/admin/provider-routing/{provider}", admin(s.setProviderRouting))
 	mux.Handle("GET /api/admin/mappings", admin(s.listMappings))
 	mux.Handle("PUT /api/admin/mappings", admin(s.replaceMappings))
 	mux.Handle("GET /api/admin/providers", admin(s.listProviders))

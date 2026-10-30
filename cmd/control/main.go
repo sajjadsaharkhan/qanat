@@ -80,6 +80,7 @@ func main() {
 
 	// Provider OAuth token refresh (REQ-OAUTH-03).
 	go api.RunTokenRefresh(workerCtx)
+	go api.RunLimitsPoll(workerCtx)
 
 	mux := http.NewServeMux()
 	api.Register(mux)
