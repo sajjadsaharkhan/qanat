@@ -16,3 +16,4 @@
 # macOS
 .DS_Store
 /deploy/local/secrets/
+/web/tsconfig.tsbuildinfo
