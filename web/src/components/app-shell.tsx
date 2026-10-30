@@ -3,6 +3,7 @@
 import {
   Activity,
   BarChart3,
+  ChartColumnStacked,
   Gauge,
   KeyRound,
   LayoutGrid,
@@ -60,6 +61,7 @@ const userNav: NavItem[] = [
 const adminNav: NavItem[] = [
   { href: "/admin", label: "Needs you", icon: Gauge },
   { href: "/admin/users", label: "Users", icon: Users },
+  { href: "/admin/usage", label: "Usage & quotas", icon: ChartColumnStacked },
   { href: "/admin/plans", label: "Plans", icon: Wallet },
   { href: "/admin/accounts", label: "Accounts", icon: Server },
   { href: "/admin/proxies", label: "Proxies", icon: Network },
@@ -118,14 +120,16 @@ function UserMenu({ me }: { me: Me }) {
   };
 
   const initials = (me.name || me.username || me.email).slice(0, 1).toUpperCase();
+  const displayName = me.name || me.username || me.email;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm" aria-label="Account menu" className="gap-2">
+        <Button variant="ghost" size="sm" className="gap-2">
           <span aria-hidden className="grid size-6 place-items-center rounded-full bg-sand text-meta font-semibold text-sand-foreground">
             {initials}
           </span>
-          <span className="hidden sm:inline">{me.name || me.username || me.email}</span>
+          <span className="hidden sm:inline">{displayName}</span>
+          <span className="sr-only">Account menu</span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
@@ -161,17 +165,15 @@ export function AppShell({ me, children }: { me: Me; children: ReactNode }) {
           </Link>
         </SidebarHeader>
         <SidebarContent>
-          <nav aria-label="Main">
-            <NavGroup items={userNav} />
-            {me.role === "admin" && <NavGroup label="Admin" items={adminNav} />}
-          </nav>
+          <NavGroup items={userNav} />
+          {me.role === "admin" && <NavGroup label="Admin" items={adminNav} />}
         </SidebarContent>
       </Sidebar>
       <SidebarInset className="min-w-0">
-        <header className="flex h-12 items-center justify-between gap-2 border-b px-4">
+        <nav aria-label="Main" className="flex h-12 items-center justify-between gap-2 border-b px-4">
           <SidebarTrigger aria-label="Toggle sidebar" />
           <UserMenu me={me} />
-        </header>
+        </nav>
         <main className="w-full min-w-0 max-w-[1120px] px-4 py-6 md:px-6">{children}</main>
       </SidebarInset>
     </SidebarProvider>

@@ -8,8 +8,8 @@
  */
 import type { NextRequest } from "next/server";
 
-const forwardRequestHeaders = ["content-type", "cookie", "x-qanat-request", "accept"];
-const forwardResponseHeaders = ["content-type", "cache-control", "retry-after"];
+const forwardRequestHeaders = ["content-type", "cookie", "x-qanat-request", "accept", "x-forwarded-host", "x-forwarded-proto"];
+const forwardResponseHeaders = ["content-type", "cache-control", "retry-after", "location"];
 
 async function proxy(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
   const { path } = await ctx.params;

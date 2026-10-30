@@ -100,6 +100,7 @@ services:
       QANAT_OIDC_ISSUER: http://localhost:59180/realms/qanat
       QANAT_OIDC_INTERNAL_URL: http://oidcmock:9180/realms/qanat
       BOOTSTRAP_ADMIN_EMAIL: admin@example.com
+      QANAT_WEB_URL: http://127.0.0.1:53000
     ports: ["58081:8081"]
     depends_on:
       redis: { condition: service_healthy }

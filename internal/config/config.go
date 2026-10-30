@@ -34,6 +34,19 @@ type Config struct {
 	// QANAT_MASTER_KEY or QANAT_MASTER_KEY_FILE. Empty: accounts can't hold
 	// credentials.
 	MasterKey string
+
+	// OIDC authentication settings (PRD §13).
+	OIDCIssuer          string // QANAT_OIDC_ISSUER
+	OIDCInternalURL     string // QANAT_OIDC_INTERNAL_URL (optional for split horizon)
+	OIDCClientID        string // QANAT_OIDC_CLIENT_ID, default "qanat-dashboard"
+	OIDCClientSecret    string // QANAT_OIDC_CLIENT_SECRET
+	BootstrapAdminEmail string // BOOTSTRAP_ADMIN_EMAIL (promoted to admin on JIT)
+	WebURL              string // QANAT_WEB_URL, default "http://localhost:3000"
+
+	// ProxyIPEchoURL is QANAT_PROXY_IP_ECHO_URL (default https://ipinfo.io/json;
+	// "off" disables): the proxy Test button's egress IP and location lookup.
+	// It may answer ipinfo.io-style JSON or a bare IP.
+	ProxyIPEchoURL string
 }
 
 // Load reads the environment and validates it.
@@ -45,10 +58,20 @@ func Load() (Config, error) {
 		ControlAddr: envOr("QANAT_CONTROL_ADDR", ":8081"),
 		TestMode:    os.Getenv("QANAT_TEST_MODE") == "1",
 
-		RootPassword:     secret("QANAT_ROOT_PASSWORD"),
-		PublicGatewayURL: envOr("QANAT_PUBLIC_GATEWAY_URL", "http://localhost:8080"),
-		InsecureCookies:  os.Getenv("QANAT_INSECURE_COOKIES") == "1",
-		MasterKey:        secret("QANAT_MASTER_KEY"),
+		RootPassword:        secret("QANAT_ROOT_PASSWORD"),
+		PublicGatewayURL:    envOr("QANAT_PUBLIC_GATEWAY_URL", "http://localhost:8080"),
+		InsecureCookies:     os.Getenv("QANAT_INSECURE_COOKIES") == "1",
+		MasterKey:           secret("QANAT_MASTER_KEY"),
+		OIDCIssuer:          os.Getenv("QANAT_OIDC_ISSUER"),
+		OIDCInternalURL:     os.Getenv("QANAT_OIDC_INTERNAL_URL"),
+		OIDCClientID:        envOr("QANAT_OIDC_CLIENT_ID", "qanat-dashboard"),
+		OIDCClientSecret:    secret("QANAT_OIDC_CLIENT_SECRET"),
+		BootstrapAdminEmail: os.Getenv("BOOTSTRAP_ADMIN_EMAIL"),
+		WebURL:              envOr("QANAT_WEB_URL", "http://localhost:3000"),
+		ProxyIPEchoURL:      envOr("QANAT_PROXY_IP_ECHO_URL", "https://ipinfo.io/json"),
+	}
+	if c.ProxyIPEchoURL == "off" {
+		c.ProxyIPEchoURL = ""
 	}
 	if c.RootPassword != "" && len(c.RootPassword) < 12 {
 		return c, fmt.Errorf("QANAT_ROOT_PASSWORD must be at least 12 characters")

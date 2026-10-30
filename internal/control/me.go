@@ -54,16 +54,23 @@ type quotasResponse struct {
 // myQuotas reports every window of the user's Plan from the hot counters the
 // gateway maintains (PRD §10.6: quota reads come from these counters only).
 func (s *Server) myQuotas(w http.ResponseWriter, r *http.Request, u *db.GetUserRow) {
-	ctx := r.Context()
-	plan, err := s.q.GetPlan(ctx, u.PlanID)
+	out, err := s.quotasFor(r.Context(), u.ID, u.PlanID)
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
-	rows, err := s.q.ListPlanQuotas(ctx, u.PlanID)
+	writeJSON(w, http.StatusOK, out)
+}
+
+// quotasFor reads one user's quota windows; admin views use it per user.
+func (s *Server) quotasFor(ctx context.Context, userID, planID string) (quotasResponse, error) {
+	plan, err := s.q.GetPlan(ctx, planID)
 	if err != nil {
-		s.internal(w, r, err)
-		return
+		return quotasResponse{}, err
+	}
+	rows, err := s.q.ListPlanQuotas(ctx, planID)
+	if err != nil {
+		return quotasResponse{}, err
 	}
 	a := anchorsOf(plan.Timezone, plan.DailyAnchor.Microseconds, plan.WeeklyAnchor, plan.MonthlyAnchor)
 	now := s.now()
@@ -74,10 +81,9 @@ func (s *Server) myQuotas(w http.ResponseWriter, r *http.Request, u *db.GetUserR
 		if row.ModelScope != nil {
 			scope = *row.ModelScope
 		}
-		used, err := s.usedMicro(ctx, u.ID, k, scope, a, now)
+		used, err := s.usedMicro(ctx, userID, k, scope, a, now)
 		if err != nil {
-			s.internal(w, r, err)
-			return
+			return quotasResponse{}, err
 		}
 		win := quotaWindow{Window: k, ModelScope: row.ModelScope, LimitUSD: row.LimitUsd, UsedUSD: quota.FromMicro(used)}
 		win.RemainingUSD = max(0, win.LimitUSD-win.UsedUSD)
@@ -86,7 +92,7 @@ func (s *Server) myQuotas(w http.ResponseWriter, r *http.Request, u *db.GetUserR
 		}
 		out.Windows = append(out.Windows, win)
 	}
-	writeJSON(w, http.StatusOK, out)
+	return out, nil
 }
 
 func (s *Server) usedMicro(ctx context.Context, userID string, k quota.Kind, scope string, a quota.Anchors, now time.Time) (int64, error) {

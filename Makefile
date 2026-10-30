@@ -7,7 +7,7 @@ INTEGRATION_ENV := QANAT_TEST_REDIS_ADDR=localhost:56379 \
 
 .PHONY: help test test-race test-reference test-integration test-acceptance bench \
         golden-update fixtures-check lint deps-up deps-down stack-up stack-down \
-        web-test web-e2e ci sqlc local-up local-down local-logs local-reset
+        web-test web-e2e ci sqlc local-up local-down local-logs local-reset local-demo local-demo-clean
 
 help: ## List targets
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | awk -F':.*?## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -89,6 +89,7 @@ local-up: $(ROOT_PW) $(MASTER_KEY) ## Run Qanat locally: dashboard on http://loc
 	@echo ""
 	@echo "  Dashboard  http://localhost:$${QANAT_WEB_PORT:-3000}"
 	@echo "  Sign in    username root, password in $(ROOT_PW)"
+	@echo "  Keycloak   alice/alice (admin), bob/bob, mallory/mallory (denied); console http://localhost:$${QANAT_KEYCLOAK_PORT:-8180} admin/admin"
 	@echo ""
 
 local-down: ## Stop the local stack (keeps data)
@@ -96,6 +97,17 @@ local-down: ## Stop the local stack (keeps data)
 
 local-logs: ## Follow local stack logs
 	$(LOCAL) logs -f
+
+# demoseed runs inside the control container, so it uses the stack's own
+# database, Redis and master key. Demo rows are tagged; clean removes only them.
+DEMOSEED := GOOS=linux GOARCH=$$(go env GOARCH) CGO_ENABLED=0 go build -o bin/demoseed-linux ./cmd/demoseed && \
+	$(LOCAL) run --rm --no-deps -v "$(CURDIR)/bin/demoseed-linux:/usr/local/bin/demoseed:ro" --entrypoint demoseed control
+
+local-demo: ## Add demo data to the local stack (users, Plans, accounts, usage…)
+	$(DEMOSEED)
+
+local-demo-clean: ## Remove the demo data again (your own data is kept)
+	$(DEMOSEED) -clean
 
 local-reset: ## Stop the local stack and delete its data
 	$(LOCAL) down -v

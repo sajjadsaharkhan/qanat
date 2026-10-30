@@ -9,10 +9,23 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { errorMessage, fetchClient } from "@/lib/api/client";
 
-function Form({ passwordEnabled }: { passwordEnabled: boolean }) {
+/** Messages for the `?error=` codes the control plane's OIDC callback redirects with. */
+const oidcErrors: Record<string, string> = {
+  oidc_disabled: "Keycloak sign-in isn't configured on this server.",
+  state_expired: "The Keycloak sign-in took too long. Try again.",
+  token_exchange_failed: "Qanat couldn't reach Keycloak. Try again, or ask the operator to check it's running.",
+  token_exchange_rejected: "Keycloak rejected the sign-in. Try again.",
+  token_verification_failed: "Qanat couldn't verify the Keycloak sign-in. Ask the operator to check the issuer settings.",
+  access_denied: "The Keycloak sign-in was cancelled.",
+};
+
+function Form({ passwordEnabled, oidcEnabled }: { passwordEnabled: boolean; oidcEnabled: boolean }) {
   const router = useRouter();
   const params = useSearchParams();
-  const [error, setError] = useState<string | null>(null);
+  const errorCode = params.get("error");
+  const [error, setError] = useState<string | null>(
+    errorCode ? (oidcErrors[errorCode] ?? "Keycloak sign-in failed. Try again.") : null,
+  );
   const [pending, setPending] = useState(false);
 
   const submit = async (e: FormEvent<HTMLFormElement>) => {
@@ -33,33 +46,55 @@ function Form({ passwordEnabled }: { passwordEnabled: boolean }) {
     router.refresh();
   };
 
-  if (!passwordEnabled) {
+  if (!passwordEnabled && !oidcEnabled) {
     return (
       <p className="text-muted-foreground">
         Password sign-in is turned off on this server, and Keycloak sign-in isn&apos;t set up yet. Ask the operator to set
-        QANAT_ROOT_PASSWORD.
+        QANAT_ROOT_PASSWORD or QANAT_OIDC_ISSUER.
       </p>
     );
   }
+
   return (
-    <form onSubmit={submit} className="flex w-full flex-col gap-4" noValidate>
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="username">Username</Label>
-        <Input id="username" name="username" autoComplete="username" defaultValue="root" required />
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="password">Password</Label>
-        <Input id="password" name="password" type="password" autoComplete="current-password" required autoFocus />
-      </div>
+    <div className="flex w-full flex-col gap-4">
       {error && (
         <p role="alert" className="text-destructive-text">
           {error}
         </p>
       )}
-      <Button type="submit" disabled={pending}>
-        {pending ? "Signing in…" : "Sign in"}
-      </Button>
-    </form>
+      {passwordEnabled && (
+        <form onSubmit={submit} className="flex w-full flex-col gap-4" noValidate>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="username">Username</Label>
+            <Input id="username" name="username" autoComplete="username" defaultValue="root" required />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="password">Password</Label>
+            <Input id="password" name="password" type="password" autoComplete="current-password" required autoFocus />
+          </div>
+          <Button type="submit" disabled={pending}>
+            {pending ? "Signing in…" : "Sign in"}
+          </Button>
+        </form>
+      )}
+      {passwordEnabled && oidcEnabled && (
+        <div className="relative my-2">
+          <div className="absolute inset-0 flex items-center">
+            <span className="w-full border-t" />
+          </div>
+          <div className="relative flex justify-center text-xs uppercase">
+            <span className="bg-background px-2 text-muted-foreground">Or</span>
+          </div>
+        </div>
+      )}
+      {oidcEnabled && (
+        <Button asChild variant={passwordEnabled ? "outline" : "default"} className="w-full">
+          {/* A full navigation: this is an API redirect, not a page; <Link> would try to fetch it as one. */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+          <a href="/api/auth/oidc/login">Sign in with Keycloak</a>
+        </Button>
+      )}
+    </div>
   );
 }
 
@@ -85,7 +120,7 @@ function Girih() {
   );
 }
 
-export function SignInForm({ passwordEnabled }: { passwordEnabled: boolean }) {
+export function SignInForm({ passwordEnabled, oidcEnabled = false }: { passwordEnabled: boolean; oidcEnabled?: boolean }) {
   return (
     <div className="grid min-h-svh lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
       <aside className="relative hidden overflow-hidden bg-brand-deep text-brand-deep-foreground lg:flex lg:flex-col lg:justify-between lg:p-12">
@@ -107,10 +142,16 @@ export function SignInForm({ passwordEnabled }: { passwordEnabled: boolean }) {
         <div className="flex flex-col items-start gap-3">
           <QanatMark className="size-10 lg:hidden" title="Qanat" />
           <h1 className="text-title font-semibold">Sign in to Qanat</h1>
-          <p className="text-muted-foreground">Root admin sign-in. Team members will sign in with Keycloak.</p>
+          <p className="text-muted-foreground">
+            {passwordEnabled && oidcEnabled
+              ? "Sign in with your team Keycloak account, or root admin password."
+              : oidcEnabled
+              ? "Sign in with your team Keycloak account."
+              : "Root admin sign-in. Team members will sign in with Keycloak."}
+          </p>
         </div>
         <Suspense>
-          <Form passwordEnabled={passwordEnabled} />
+          <Form passwordEnabled={passwordEnabled} oidcEnabled={oidcEnabled} />
         </Suspense>
       </main>
     </div>

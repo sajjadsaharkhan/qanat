@@ -12,7 +12,12 @@ export default async function SignInPage() {
   if (await currentUser()) redirect("/");
   const base = process.env.QANAT_CONTROL_URL ?? "http://localhost:8081";
   const methods = await fetch(`${base}/api/auth/methods`, { cache: "no-store" })
-    .then((r) => (r.ok ? (r.json() as Promise<{ password: boolean }>) : { password: false }))
-    .catch(() => ({ password: false }));
-  return <SignInForm passwordEnabled={methods.password} />;
+    .then((r) => (r.ok ? (r.json() as Promise<{ password: boolean; oidc?: boolean }>) : { password: false, oidc: false }))
+    .catch(() => ({ password: false, oidc: false }));
+
+  if (!methods.password && methods.oidc) {
+    redirect("/api/auth/oidc/login");
+  }
+
+  return <SignInForm passwordEnabled={methods.password} oidcEnabled={!!methods.oidc} />;
 }

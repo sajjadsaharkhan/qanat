@@ -58,12 +58,19 @@ func main() {
 	go worker.Run(workerCtx)
 
 	api := control.New(pg, rdb, log, control.Options{
-		RootPassword:  cfg.RootPassword,
-		GatewayURL:    cfg.PublicGatewayURL,
-		SecureCookies: !cfg.InsecureCookies,
-		Box:           box,
-		Worker:        worker,
-		TestMode:      cfg.TestMode,
+		RootPassword:        cfg.RootPassword,
+		GatewayURL:          cfg.PublicGatewayURL,
+		SecureCookies:       !cfg.InsecureCookies,
+		Box:                 box,
+		Worker:              worker,
+		TestMode:            cfg.TestMode,
+		OIDCIssuer:          cfg.OIDCIssuer,
+		OIDCInternalURL:     cfg.OIDCInternalURL,
+		OIDCClientID:        cfg.OIDCClientID,
+		OIDCClientSecret:    cfg.OIDCClientSecret,
+		BootstrapAdminEmail: cfg.BootstrapAdminEmail,
+		WebURL:              cfg.WebURL,
+		ProxyIPEchoURL:      cfg.ProxyIPEchoURL,
 	})
 	if err := api.Bootstrap(ctx); err != nil {
 		log.Error("bootstrap", "err", err)
