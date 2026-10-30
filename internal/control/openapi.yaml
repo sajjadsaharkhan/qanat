@@ -260,6 +260,19 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /api/admin/accounts/{id}/limits:
+    get:
+      operationId: accountLimits
+      summary: The account's remaining subscription quota, read from the provider's usage API through the account's proxy; cached for 5 minutes
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { name: force, in: query, required: false, schema: { type: string, enum: ["1"] }, description: Skip the cache and ask the provider now }
+      responses:
+        "200":
+          description: Limits, or supported=false for credentials without a usage API (API keys); a failed read is still a 200 with error set
+          content: { application/json: { schema: { $ref: "#/components/schemas/AccountLimits" } } }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /api/admin/accounts/{id}/move:
     post:
       operationId: moveAccount
@@ -874,6 +887,28 @@ components:
         ok: { type: boolean, description: The credential authenticated; 429 counts as valid }
         status: { type: integer, description: Upstream HTTP status, 0 on connection error }
         latency_ms: { type: integer, format: int64 }
+        error: { type: string }
+    LimitWindow:
+      type: object
+      required: [key, label, group, used_percent, resets_at]
+      properties:
+        key: { type: string, description: "Stable id: session, weekly, weekly_opus, a model id, …" }
+        label: { type: string }
+        group: { type: string, enum: [session, weekly, model] }
+        used_percent: { type: number, description: 0–100 }
+        resets_at: { type: [string, "null"], format: date-time }
+    AccountLimits:
+      type: object
+      required: [account_id, supported, windows, limit_reached, fetched_at, stale]
+      properties:
+        account_id: { type: string }
+        supported: { type: boolean, description: The provider publishes limits for this credential kind }
+        plan: { type: string }
+        windows: { type: array, items: { $ref: "#/components/schemas/LimitWindow" } }
+        reset_credits: { type: integer, description: Limit-reset grants the account could spend (shown, never spent) }
+        limit_reached: { type: boolean }
+        fetched_at: { type: [string, "null"], format: date-time }
+        stale: { type: boolean, description: The windows are the last good read; error says why the fresh one failed }
         error: { type: string }
     OAuthAuthorizeResult:
       type: object

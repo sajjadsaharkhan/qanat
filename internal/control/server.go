@@ -143,6 +143,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.Handle("PATCH /api/admin/accounts/{id}", admin(s.updateAccount))
 	mux.Handle("DELETE /api/admin/accounts/{id}", admin(s.deleteAccount))
 	mux.Handle("POST /api/admin/accounts/{id}/test", admin(s.testAccount))
+	mux.Handle("GET /api/admin/accounts/{id}/limits", admin(s.accountLimits))
 	mux.Handle("POST /api/admin/accounts/{id}/move", admin(s.moveAccount))
 	mux.Handle("POST /api/admin/accounts/validate", admin(s.validateAccount))
 	mux.Handle("GET /api/admin/accounts/oauth/{provider}/authorize", admin(s.oauthAuthorize))

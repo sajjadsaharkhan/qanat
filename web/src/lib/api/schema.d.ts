@@ -404,6 +404,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/accounts/{id}/limits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The account's remaining subscription quota, read from the provider's usage API through the account's proxy; cached for 5 minutes */
+        get: operations["accountLimits"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/accounts/{id}/move": {
         parameters: {
             query?: never;
@@ -1084,6 +1101,32 @@ export interface components {
             status: number;
             /** Format: int64 */
             latency_ms: number;
+            error?: string;
+        };
+        LimitWindow: {
+            /** @description Stable id: session, weekly, weekly_opus, a model id, … */
+            key: string;
+            label: string;
+            /** @enum {string} */
+            group: "session" | "weekly" | "model";
+            /** @description 0–100 */
+            used_percent: number;
+            /** Format: date-time */
+            resets_at: string | null;
+        };
+        AccountLimits: {
+            account_id: string;
+            /** @description The provider publishes limits for this credential kind */
+            supported: boolean;
+            plan?: string;
+            windows: components["schemas"]["LimitWindow"][];
+            /** @description Limit-reset grants the account could spend (shown */
+            reset_credits?: number;
+            limit_reached: boolean;
+            /** Format: date-time */
+            fetched_at: string | null;
+            /** @description The windows are the last good read; error says why the fresh one failed */
+            stale: boolean;
             error?: string;
         };
         OAuthAuthorizeResult: {
@@ -2150,6 +2193,33 @@ export interface operations {
                 };
             };
             400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    accountLimits: {
+        parameters: {
+            query?: {
+                /** @description Skip the cache and ask the provider now */
+                force?: "1";
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Limits, or supported=false for credentials without a usage API (API keys); a failed read is still a 200 with error set */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountLimits"];
+                };
+            };
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
         };
