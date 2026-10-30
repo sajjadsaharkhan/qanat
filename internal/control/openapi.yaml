@@ -265,6 +265,19 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /api/admin/providers/{provider}/models:
+    get:
+      operationId: providerModels
+      summary: The provider's real model catalog, fetched with a stored account's own credential
+      parameters:
+        - { name: provider, in: path, required: true, schema: { $ref: "#/components/schemas/Provider" } }
+      responses:
+        "200":
+          description: The upstream model IDs, in the provider's order
+          content: { application/json: { schema: { $ref: "#/components/schemas/ProviderModels" } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
   /api/admin/proxies:
     get:
       operationId: listProxies
@@ -857,6 +870,11 @@ components:
       properties:
         id: { type: string, description: The account ID }
         merged: { type: boolean, description: True when an existing account for the same identity was re-signed-in }
+    ProviderModels:
+      type: object
+      required: [models]
+      properties:
+        models: { type: array, items: { type: string }, description: The provider's upstream model IDs }
     AccountProxy:
       type: string
       description: '"inherit" (next level of PRD §8.2: provider, then global default, else direct), "direct", a proxy ID, or "group:" + a proxy group ID'

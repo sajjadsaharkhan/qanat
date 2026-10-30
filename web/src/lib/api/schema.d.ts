@@ -404,6 +404,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/providers/{provider}/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The provider's real model catalog, fetched with a stored account's own credential */
+        get: operations["providerModels"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/proxies": {
         parameters: {
             query?: never;
@@ -1053,6 +1070,10 @@ export interface components {
             id: string;
             /** @description True when an existing account for the same identity was re-signed-in */
             merged: boolean;
+        };
+        ProviderModels: {
+            /** @description The provider's upstream model IDs */
+            models: string[];
         };
         /** @description "inherit" (next level of PRD §8.2: provider, then global default, else direct), "direct", a proxy ID, or "group:" + a proxy group ID */
         AccountProxy: string;
@@ -1908,6 +1929,31 @@ export interface operations {
             400: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    providerModels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: components["schemas"]["Provider"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The upstream model IDs, in the provider's order */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderModels"];
+                };
+            };
+            400: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            502: components["responses"]["Error"];
         };
     };
     listProxies: {
