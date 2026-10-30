@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"qanat/internal/core/oauth"
 	"qanat/internal/core/provider"
 	"qanat/internal/proxy"
 	"qanat/internal/store/db"
@@ -450,23 +451,32 @@ func (s *Server) validateAccount(w http.ResponseWriter, r *http.Request, _ *db.G
 }
 
 // upstreamProbe builds the official-endpoint request that decides whether a
-// credential is accepted. claude gets a minimal Messages call (it works for
-// API keys and tokens alike); codex and antigravity list their models.
+// credential is accepted. Claude OAuth tokens are probed on the usage
+// endpoint the CLI itself uses — a Messages call would depend on a model
+// name that subscription auth may not serve (and costs tokens); API keys
+// list the models. Codex and antigravity list their models.
 func upstreamProbe(ctx context.Context, providerID, authKind, token, base string) (*http.Request, error) {
 	switch providerID {
 	case "claude":
-		body := strings.NewReader(`{"model":"claude-3-5-haiku-latest","max_tokens":1,"messages":[{"role":"user","content":"ping"}]}`)
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSuffix(base, "/")+"/v1/messages", body)
-		if err != nil {
-			return nil, err
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("anthropic-version", "2023-06-01")
+		var (
+			req *http.Request
+			err error
+		)
 		if authKind == "api_key" {
+			req, err = http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSuffix(base, "/")+"/v1/models", nil)
+			if err != nil {
+				return nil, err
+			}
 			req.Header.Set("X-Api-Key", token)
 		} else {
+			req, err = http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSuffix(base, "/")+"/api/oauth/usage", nil)
+			if err != nil {
+				return nil, err
+			}
 			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("anthropic-beta", oauth.OAuthBeta)
 		}
+		req.Header.Set("anthropic-version", "2023-06-01")
 		return req, nil
 	case "codex":
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSuffix(base, "/")+"/v1/models", nil)
