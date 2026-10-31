@@ -15,6 +15,7 @@ import {
   ToggleGroup as ToggleGroupPrimitive,
 } from "@animate-ui/react/primitives/radix-ui";
 import { CheckIcon, MinusIcon } from "lucide-react";
+import { Tabs as RadixTabs } from "radix-ui";
 import type { ComponentProps } from "react";
 
 import { cn } from "@/lib/utils";
@@ -30,6 +31,15 @@ export function TabsList({ className, ...props }: ComponentProps<typeof TabsPrim
       {...props}
     />
   );
+}
+
+/**
+ * The region the tabs filter. Plain Radix content, so switching tabs doesn't
+ * remount or animate the list; it exists so the active tab's aria-controls
+ * points at a real tabpanel.
+ */
+export function TabsPanel(props: ComponentProps<typeof RadixTabs.Content>) {
+  return <RadixTabs.Content {...props} />;
 }
 
 export function TabsTrigger({ className, ...props }: ComponentProps<typeof TabsPrimitive.Trigger>) {

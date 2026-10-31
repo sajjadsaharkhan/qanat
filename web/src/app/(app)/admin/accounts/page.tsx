@@ -18,7 +18,7 @@ import { toast } from "sonner";
 
 import { AccountCard, AccountRow, type ItemProps } from "@/components/qanat/accounts/account-item";
 import { AddAccountDialog, EditAccountDialog } from "@/components/qanat/accounts/account-dialogs";
-import { Checkbox, Menu, MenuContent, MenuItem, MenuLabel, MenuTrigger, Tabs, TabsList, TabsTrigger, ToggleGroup, ToggleGroupItem } from "@/components/qanat/accounts/animated";
+import { Checkbox, Menu, MenuContent, MenuItem, MenuLabel, MenuTrigger, Tabs, TabsList, TabsPanel, TabsTrigger, ToggleGroup, ToggleGroupItem } from "@/components/qanat/accounts/animated";
 import { useNow } from "@/components/qanat/accounts/limit-bars";
 import { headroom, nextReset, supportsLimits, useAccountLimits, type Account } from "@/components/qanat/accounts/limits";
 import { PoolSummaryCard } from "@/components/qanat/accounts/pool-summary";
@@ -327,145 +327,147 @@ function Accounts() {
             </TabsTrigger>
           ))}
         </TabsList>
-      </Tabs>
 
-      {loading ? (
-        <div className="mt-4 space-y-3">
-          <div className="grid gap-3 md:grid-cols-3">
-            <Skeleton className="h-36" />
-            <Skeleton className="h-36" />
-            <Skeleton className="h-36" />
-          </div>
-          <Skeleton className="h-64 w-full" />
-        </div>
-      ) : (
-        <>
-          <div className={`mt-4 grid gap-3 ${tab === "all" ? "md:grid-cols-3" : ""}`}>
-            {(tab === "all" ? providers : providers.filter((p) => p.id === tab)).map((p) => (
-              <PoolSummaryCard
-                key={p.id}
-                name={p.name}
-                prefix={p.prefix}
-                logo={p.logo}
-                accounts={all.filter((a) => a.provider === p.id)}
-                byId={limits.byId}
-                now={now}
-                onSelect={tab === "all" ? () => setTab(p.id) : undefined}
-                footer={<RoutingButton routing={routing.data?.find((r) => r.provider === p.id)} providerName={p.name} />}
-              />
-            ))}
-          </div>
-
-          {/* Toolbar: select all, search, filters, sort, view. */}
-          <div className="mt-6 flex flex-wrap items-center gap-2">
-            <Checkbox
-              checked={allChecked}
-              onCheckedChange={(v) => setSelected(v === true ? new Set([...selected, ...visibleIds]) : new Set([...selected].filter((id) => !visibleIds.includes(id))))}
-              aria-label="Select all shown accounts"
-              disabled={visibleIds.length === 0}
-              className="me-1"
-            />
-            <div className="relative min-w-48 flex-1 sm:max-w-72">
-              <Search aria-hidden className="pointer-events-none absolute start-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search label, email or ID" aria-label="Search accounts" className="h-8 ps-8" />
+        <TabsPanel value={tab} className="outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
+        {loading ? (
+          <div className="mt-4 space-y-3">
+            <div className="grid gap-3 md:grid-cols-3">
+              <Skeleton className="h-36" />
+              <Skeleton className="h-36" />
+              <Skeleton className="h-36" />
             </div>
-            <Select value={status} onValueChange={(v) => setStatus(v as Status)}>
-              <SelectTrigger size="sm" className="w-36" aria-label="Status filter">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {statuses.map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {statusLabel[s]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={kind} onValueChange={(v) => setKind(v as Kind)}>
-              <SelectTrigger size="sm" className="w-36" aria-label="Credential filter">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {kinds.map((k) => (
-                  <SelectItem key={k} value={k}>
-                    {kindLabel[k]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={sort} onValueChange={(v) => setSort(v as Sort)}>
-              <SelectTrigger size="sm" className="w-40" aria-label="Sort">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {sorts.map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {sortLabel[s]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <ToggleGroup type="single" value={view} onValueChange={(v) => v && setView(v as View)} aria-label="View" className="ms-auto">
-              <ToggleGroupItem value="list" aria-label="List view">
-                <List />
-              </ToggleGroupItem>
-              <ToggleGroupItem value="grid" aria-label="Grid view">
-                <LayoutGrid />
-              </ToggleGroupItem>
-            </ToggleGroup>
+            <Skeleton className="h-64 w-full" />
           </div>
+        ) : (
+          <>
+            <div className={`mt-4 grid gap-3 ${tab === "all" ? "md:grid-cols-3" : ""}`}>
+              {(tab === "all" ? providers : providers.filter((p) => p.id === tab)).map((p) => (
+                <PoolSummaryCard
+                  key={p.id}
+                  name={p.name}
+                  prefix={p.prefix}
+                  logo={p.logo}
+                  accounts={all.filter((a) => a.provider === p.id)}
+                  byId={limits.byId}
+                  now={now}
+                  onSelect={tab === "all" ? () => setTab(p.id) : undefined}
+                  footer={<RoutingButton routing={routing.data?.find((r) => r.provider === p.id)} providerName={p.name} />}
+                />
+              ))}
+            </div>
 
-          <BulkBar
-            count={selectedVisible.length}
-            busy={bulkBusy || anyTesting || limits.refreshing.size > 0}
-            onRefresh={() => refreshMany(selectedVisible)}
-            onTest={() => testMany(selectedVisible)}
-            onEnable={() => setEnabledMany(selectedVisible, true)}
-            onDisable={() => setEnabledMany(selectedVisible, false)}
-            onClear={() => setSelected(new Set())}
-          />
+            {/* Toolbar: select all, search, filters, sort, view. */}
+            <div className="mt-6 flex flex-wrap items-center gap-2">
+              <Checkbox
+                checked={allChecked}
+                onCheckedChange={(v) => setSelected(v === true ? new Set([...selected, ...visibleIds]) : new Set([...selected].filter((id) => !visibleIds.includes(id))))}
+                aria-label="Select all shown accounts"
+                disabled={visibleIds.length === 0}
+                className="me-1"
+              />
+              <div className="relative min-w-48 flex-1 sm:max-w-72">
+                <Search aria-hidden className="pointer-events-none absolute start-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search label, email or ID" aria-label="Search accounts" className="h-8 ps-8" />
+              </div>
+              <Select value={status} onValueChange={(v) => setStatus(v as Status)}>
+                <SelectTrigger size="sm" className="w-36" aria-label="Status filter">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {statuses.map((s) => (
+                    <SelectItem key={s} value={s}>
+                      {statusLabel[s]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={kind} onValueChange={(v) => setKind(v as Kind)}>
+                <SelectTrigger size="sm" className="w-36" aria-label="Credential filter">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {kinds.map((k) => (
+                    <SelectItem key={k} value={k}>
+                      {kindLabel[k]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={sort} onValueChange={(v) => setSort(v as Sort)}>
+                <SelectTrigger size="sm" className="w-40" aria-label="Sort">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {sorts.map((s) => (
+                    <SelectItem key={s} value={s}>
+                      {sortLabel[s]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <ToggleGroup type="single" value={view} onValueChange={(v) => v && setView(v as View)} aria-label="View" className="ms-auto">
+                <ToggleGroupItem value="list" aria-label="List view">
+                  <List />
+                </ToggleGroupItem>
+                <ToggleGroupItem value="grid" aria-label="Grid view">
+                  <LayoutGrid />
+                </ToggleGroupItem>
+              </ToggleGroup>
+            </div>
 
-          <div className="mt-3">
-            {inTab.length === 0 ? (
-              <EmptyState title={tab === "all" ? "No accounts yet" : `No ${providerOf(tab).name} accounts yet`} action={addButton}>
-                Add a provider account to the pool; users&apos; requests are served from it.
-              </EmptyState>
-            ) : visible.length === 0 ? (
-              <EmptyState
-                title="No account matches"
-                action={
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      setQuery("");
-                      setStatus("all");
-                      setKind("all");
-                    }}
-                  >
-                    <X className="me-1.5 size-4" />
-                    Clear filters
-                  </Button>
-                }
-              >
-                {inTab.length} account{inTab.length === 1 ? " is" : "s are"} hidden by the search or filters.
-              </EmptyState>
-            ) : (
-              sections.map((s) => (
-                <section key={s.provider?.id ?? "flat"} className="mb-5 last:mb-0" aria-label={s.provider?.name}>
-                  {s.provider && (
-                    <h2 className="mb-1.5 flex items-center gap-2 text-section font-semibold text-muted-foreground">
-                      {s.provider.name}
-                      <span className="text-xs font-normal tabular-nums">{s.items.length}</span>
-                    </h2>
-                  )}
-                  <AccountList view={view} items={s.items} render={(a) => (view === "grid" ? <AccountCard {...itemProps(a, s.items)} /> : <AccountRow {...itemProps(a, s.items)} />)} />
-                </section>
-              ))
-            )}
-          </div>
-        </>
-      )}
+            <BulkBar
+              count={selectedVisible.length}
+              busy={bulkBusy || anyTesting || limits.refreshing.size > 0}
+              onRefresh={() => refreshMany(selectedVisible)}
+              onTest={() => testMany(selectedVisible)}
+              onEnable={() => setEnabledMany(selectedVisible, true)}
+              onDisable={() => setEnabledMany(selectedVisible, false)}
+              onClear={() => setSelected(new Set())}
+            />
+
+            <div className="mt-3">
+              {inTab.length === 0 ? (
+                <EmptyState title={tab === "all" ? "No accounts yet" : `No ${providerOf(tab).name} accounts yet`} action={addButton}>
+                  Add a provider account to the pool; users&apos; requests are served from it.
+                </EmptyState>
+              ) : visible.length === 0 ? (
+                <EmptyState
+                  title="No account matches"
+                  action={
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setQuery("");
+                        setStatus("all");
+                        setKind("all");
+                      }}
+                    >
+                      <X className="me-1.5 size-4" />
+                      Clear filters
+                    </Button>
+                  }
+                >
+                  {inTab.length} account{inTab.length === 1 ? " is" : "s are"} hidden by the search or filters.
+                </EmptyState>
+              ) : (
+                sections.map((s) => (
+                  <section key={s.provider?.id ?? "flat"} className="mb-5 last:mb-0" aria-label={s.provider?.name}>
+                    {s.provider && (
+                      <h2 className="mb-1.5 flex items-center gap-2 text-section font-semibold text-muted-foreground">
+                        {s.provider.name}
+                        <span className="text-xs font-normal tabular-nums">{s.items.length}</span>
+                      </h2>
+                    )}
+                    <AccountList view={view} items={s.items} render={(a) => (view === "grid" ? <AccountCard {...itemProps(a, s.items)} /> : <AccountRow {...itemProps(a, s.items)} />)} />
+                  </section>
+                ))
+              )}
+            </div>
+          </>
+        )}
+        </TabsPanel>
+      </Tabs>
 
       {addFor && (
         <AddAccountDialog

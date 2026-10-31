@@ -20,7 +20,22 @@ export async function signIn(page: Page, role: Role, groups = ["qanat-users"]) {
 }
 
 /** WCAG 2.1 AA, zero violations allowed (design.md §11). */
+/**
+ * Axe reads computed colors, so a tile caught mid-fade reports blended,
+ * failing contrast. Wait for finite animations (entrance fades, count-ups)
+ * to finish; infinite ones (spinners, pulses) never will.
+ */
+async function settle(page: Page) {
+  await page.waitForFunction(
+    () => document.getAnimations().every((a) => a.playState !== "running" || (a.effect?.getTiming().iterations ?? 1) === Infinity),
+    undefined,
+    { timeout: 10_000 },
+  );
+  await page.waitForTimeout(500); // motion's JS-driven springs aren't in getAnimations()
+}
+
 export async function expectAccessible(page: Page) {
+  await settle(page);
   const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
   expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([]);
 }

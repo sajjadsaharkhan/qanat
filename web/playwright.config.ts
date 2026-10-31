@@ -17,6 +17,10 @@ export default defineConfig({
   workers: 1,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
+  // Baselines are reviewed on macOS (*-darwin.png); Linux CI renders fonts
+  // differently, so CI keeps the axe and reduced-motion checks and skips
+  // screenshot comparisons.
+  ignoreSnapshots: !!process.env.CI,
   reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : "list",
   expect: { toHaveScreenshot: { maxDiffPixelRatio: 0.001, animations: "disabled" } },
   use: {

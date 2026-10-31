@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 )
@@ -72,9 +73,13 @@ func TestAccess_ModelsListIsFilteredByPlan(t *testing.T) {
 		ids = append(ids, m.ID)
 	}
 	sort.Strings(ids)
-	// Bare names come from the admin's mapping; the provider's own catalog is
-	// listed prefixed (REQ-MAP-04), so claude-sonnet-4-6 shows as cc/….
-	if len(ids) != 2 || ids[0] != "cc/claude-sonnet-4-6" || ids[1] != "sonnet" {
+	// The plan filter is the point here, not naming: the real gateway lists a
+	// provider's catalog prefixed (cc/…, REQ-MAP-04), the reference bare.
+	for i, id := range ids {
+		ids[i] = strings.TrimPrefix(id, "cc/")
+	}
+	sort.Strings(ids)
+	if len(ids) != 2 || ids[0] != "claude-sonnet-4-6" || ids[1] != "sonnet" {
 		t.Fatalf("REQ-ACCESS-02: got %v", ids)
 	}
 }
