@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -47,8 +48,30 @@ func Redis(addr string) *redis.Client {
 		ReadTimeout:  500 * time.Millisecond,
 		WriteTimeout: 500 * time.Millisecond,
 		PoolSize:     64,
-		MinIdleConns: 4,
+		MinIdleConns: redisWarmConns,
 	})
+}
+
+// redisWarmConns stay open while idle, so a burst of concurrent requests
+// (Claude Code fans out several at once) doesn't dial on the hot path.
+const redisWarmConns = 32
+
+// WarmRedis opens the idle connections now rather than in the background,
+// so a process reports ready only once the first burst won't dial.
+func WarmRedis(ctx context.Context, rdb *redis.Client) error {
+	var wg sync.WaitGroup
+	errs := make(chan error, redisWarmConns)
+	for range redisWarmConns {
+		wg.Go(func() { errs <- rdb.Ping(ctx).Err() })
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // WaitFor retries ping until it succeeds or ctx ends, logging each failure.

@@ -6,6 +6,13 @@
 //
 //	overhead.pXX = gateway.pXX - direct.pXX
 //
+// With -metrics, the budget and the baseline apply to the gateway's own
+// overhead histogram (qanat_gateway_overhead_seconds: client TTFT minus
+// upstream TTFT, §15.1) over the gateway run instead. The client-side
+// difference of two p99s is still reported, but each side's tail swings by
+// tens of milliseconds with the upstream's replayed timing, so it can't
+// resolve a 10 ms budget.
+//
 // Exit codes: 0 ok, 1 budget or regression exceeded, 2 usage/runtime error.
 //
 //	loadgen -gateway http://localhost:8080 -direct http://localhost:9090 \
@@ -21,9 +28,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
+	"regexp"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -43,8 +53,16 @@ type result struct {
 		P50 float64 `json:"p50_ms"`
 		P99 float64 `json:"p99_ms"`
 	} `json:"overhead"`
-	Concurrency int    `json:"concurrency"`
-	At          string `json:"at"`
+	// Measured is the gateway's own view of its overhead (-metrics).
+	Measured    *measured `json:"gateway_measured,omitempty"`
+	Concurrency int       `json:"concurrency"`
+	At          string    `json:"at"`
+}
+
+type measured struct {
+	N               int     `json:"n"`
+	WithinBudgetPct float64 `json:"within_budget_pct"`
+	P99AtMost       float64 `json:"p99_at_most_ms"` // upper edge of the histogram bucket holding p99
 }
 
 const defaultBody = `{"model":"claude-sonnet-4-6","max_tokens":64,"stream":true,"messages":[{"role":"user","content":"bench"}]}`
@@ -56,6 +74,7 @@ func main() {
 	n := flag.Int("n", 300, "requests per target")
 	c := flag.Int("c", 20, "concurrency")
 	bodyFile := flag.String("body", "", "request body file (default: small streaming request)")
+	metrics := flag.String("metrics", "", "gateway /metrics URL: gate on its own overhead histogram")
 	out := flag.String("out", "", "write JSON result here")
 	budget := flag.Duration("budget-p99", 0, "fail if overhead p99 exceeds this (0 = off)")
 	baseline := flag.String("baseline", "", "previous result JSON to compare against")
@@ -78,7 +97,23 @@ func main() {
 	var res result
 	res.Concurrency, res.At = *c, time.Now().UTC().Format(time.RFC3339)
 	res.Direct = run(*direct, "", body, *n, *c)
+	var before map[float64]float64
+	if *metrics != "" {
+		var err error
+		if before, err = scrape(*metrics); err != nil {
+			fmt.Fprintln(os.Stderr, "metrics:", err)
+			os.Exit(2)
+		}
+	}
 	res.Gateway = run(*gw, *key, body, *n, *c)
+	if *metrics != "" {
+		after, err := scrape(*metrics)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "metrics:", err)
+			os.Exit(2)
+		}
+		res.Measured = measure(before, after, *budget)
+	}
 	res.Overhead.P50 = res.Gateway.P50 - res.Direct.P50
 	res.Overhead.P99 = res.Gateway.P99 - res.Direct.P99
 
@@ -93,13 +128,24 @@ func main() {
 		fmt.Fprintf(os.Stderr, "FAIL: request errors (direct=%d gateway=%d)\n", res.Direct.Err, res.Gateway.Err)
 		fail = true
 	}
-	if *budget > 0 && res.Overhead.P99 > ms(*budget) {
+	switch m := res.Measured; {
+	case *budget <= 0:
+	case m != nil && (m.N == 0 || m.WithinBudgetPct < 99):
+		fmt.Fprintf(os.Stderr, "FAIL: gateway overhead within %.0fms for %.1f%% of %d requests; p99 needs 99%%\n", ms(*budget), m.WithinBudgetPct, m.N)
+		fail = true
+	case m == nil && res.Overhead.P99 > ms(*budget):
 		fmt.Fprintf(os.Stderr, "FAIL: overhead p99 %.3fms exceeds budget %.3fms\n", res.Overhead.P99, ms(*budget))
 		fail = true
 	}
 	if *baseline != "" {
 		var base result
-		if b, err := os.ReadFile(*baseline); err == nil && json.Unmarshal(b, &base) == nil && base.Overhead.P99 > 0 {
+		if b, err := os.ReadFile(*baseline); err == nil && json.Unmarshal(b, &base) == nil && res.Measured != nil && base.Measured != nil {
+			if limit := base.Measured.P99AtMost * (1 + *maxReg); res.Measured.P99AtMost > limit {
+				fmt.Fprintf(os.Stderr, "FAIL: gateway overhead p99 ≤%.1fms regressed more than %.0f%% vs baseline ≤%.1fms\n",
+					res.Measured.P99AtMost, *maxReg*100, base.Measured.P99AtMost)
+				fail = true
+			}
+		} else if err == nil && base.Overhead.P99 > 0 {
 			limit := base.Overhead.P99 * (1 + *maxReg)
 			if res.Overhead.P99 > limit {
 				fmt.Fprintf(os.Stderr, "FAIL: overhead p99 %.3fms regressed more than %.0f%% vs baseline %.3fms\n",
@@ -193,3 +239,59 @@ func pct(sorted []time.Duration, p float64) time.Duration {
 }
 
 func ms(d time.Duration) float64 { return float64(d.Microseconds()) / 1000 }
+
+var bucketLine = regexp.MustCompile(`^qanat_gateway_overhead_seconds_bucket\{.*le="([^"]+)".*\} (\S+)$`)
+
+// scrape reads the gateway's overhead histogram, summed over providers:
+// cumulative count per bucket upper edge, in seconds.
+func scrape(url string) (map[float64]float64, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	out := map[float64]float64{}
+	for _, line := range bytes.Split(raw, []byte("\n")) {
+		m := bucketLine.FindSubmatch(line)
+		if m == nil {
+			continue
+		}
+		le, err1 := strconv.ParseFloat(string(m[1]), 64) // "+Inf" parses as +Inf
+		v, err2 := strconv.ParseFloat(string(m[2]), 64)
+		if err1 == nil && err2 == nil {
+			out[le] += v
+		}
+	}
+	return out, nil
+}
+
+// measure turns two scrapes into the share of requests within budget and
+// the bucket edge p99 falls under. A budget between edges counts only the
+// edge below it, so the check never passes on rounding.
+func measure(before, after map[float64]float64, budget time.Duration) *measured {
+	edges := make([]float64, 0, len(after))
+	for le := range after {
+		edges = append(edges, le)
+	}
+	sort.Float64s(edges)
+	n := after[math.Inf(1)] - before[math.Inf(1)]
+	m := &measured{N: int(n)}
+	if n <= 0 {
+		return m
+	}
+	m.P99AtMost = math.Inf(1)
+	for _, le := range edges {
+		share := (after[le] - before[le]) / n
+		if le <= budget.Seconds() {
+			m.WithinBudgetPct = 100 * share
+		}
+		if share >= 0.99 && math.IsInf(m.P99AtMost, 1) {
+			m.P99AtMost = le * 1000
+		}
+	}
+	return m
+}

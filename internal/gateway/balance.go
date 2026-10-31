@@ -443,6 +443,16 @@ func (r *redisRotation) state(ctx context.Context, up, provider string, ids []st
 	return current, n, last, nil
 }
 
+// LoadScripts caches the balancing scripts in Redis (see quota.LoadScripts).
+func LoadScripts(ctx context.Context, rdb *redis.Client) error {
+	for _, sc := range []*redis.Script{usedScript, pinnedScript} {
+		if err := sc.Load(ctx, rdb).Err(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // usedScript bumps the user's run on the same account or starts a new one,
 // and stamps the account's last use — atomically, so replicas agree.
 var usedScript = redis.NewScript(`

@@ -242,7 +242,7 @@ The admin assigns each person a Plan with dollar quotas (5-hour rolling, daily, 
   - It covers passthrough fidelity, no-buffering (structural), disconnect cancellation, mid-stream failure, pre-first-byte failover, auth, model access, `/v1/models` filtering, quota errors, usage pricing and TTFT overhead.
 - **Seam B, translator goldens:** recorded upstream streams per provider fed through each translator, compared with normalized golden event sequences, plus structural contract checks. Fixtures are scrubbed and secret-scanned in CI.
 - **Seam C, Admin API:** HTTP tests with an in-process OIDC issuer standing in for Keycloak (entry gate, JIT provisioning, roles, bootstrap admin). Aggregation-worker tests run against real Redis and PostgreSQL, including the rebuild-after-Redis-loss path.
-- **Latency gate:** a load generator compares TTFT direct to the mock vs through gateway and Nginx under concurrency. It fails at p99 overhead > 10 ms or a > 10% regression against the committed baseline (REQ-PERF-05).
+- **Latency gate:** a load generator sends the same stream direct to the mock and through gateway and Nginx under concurrency. It gates on the gateway's own overhead histogram (client TTFT minus upstream TTFT): it fails at p99 overhead > 10 ms or a > 10% regression against the committed baseline (REQ-PERF-05). The client-side TTFT comparison is reported alongside.
 - **Dashboard:**
   - Vitest for formatting, quota thresholds, reset math and model tiers.
   - A token-contrast test that reads `globals.css` and enforces WCAG AA in both themes.

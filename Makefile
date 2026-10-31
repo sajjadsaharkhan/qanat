@@ -61,6 +61,7 @@ test-acceptance: stack-up ## Acceptance suite against the real stack through Ngi
 bench: stack-up ## Latency gate: overhead p99 < 10ms and < 10% regression
 	key=$$(go run ./cmd/benchseed) && \
 	go run ./cmd/loadgen -gateway http://localhost:58080 -direct http://localhost:59090 \
+	  -metrics http://localhost:58082/metrics \
 	  -key "$$key" -n 500 -c 50 \
 	  -budget-p99 10ms -baseline bench/baseline.json -max-regression 0.10 -out bench/result.json
 

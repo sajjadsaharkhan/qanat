@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"os"
 	"time"
@@ -51,8 +52,18 @@ func main() {
 	defer stopWatch()
 	go snap.Run(watchCtx)
 
+	// Open Redis connections and cache scripts before serving, so the first
+	// burst after a start doesn't pay for them. Best effort: quota checks
+	// fail open anyway (§15.3).
+	qs := quota.NewStore(rdb)
+	wctx, cancelWarm := context.WithTimeout(ctx, 5*time.Second)
+	if err := errors.Join(platform.WarmRedis(wctx, rdb), qs.LoadScripts(wctx), gateway.LoadScripts(wctx, rdb)); err != nil {
+		log.Warn("redis warm-up incomplete; first requests may be slower", "err", err)
+	}
+	cancelWarm()
+
 	pub := gateway.NewPublisher(rdb, log)
-	gw := gateway.New(snap, quota.NewStore(rdb), pub, pg, log, cfg.TestMode)
+	gw := gateway.New(snap, qs, pub, pg, log, cfg.TestMode)
 	gw.UseRedis(rdb)
 
 	go gw.RunProxyHealth(watchCtx, rdb)

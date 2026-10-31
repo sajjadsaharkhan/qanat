@@ -59,6 +59,12 @@ func rpmKey(userID string, now time.Time) string {
 	return "qanat:rpm:" + userID + ":" + strconv.FormatInt(now.Unix()/60, 10)
 }
 
+// LoadScripts puts the quota script in Redis's script cache, so the first
+// Admit after a start runs EVALSHA once instead of failing over to EVAL.
+func (s *Store) LoadScripts(ctx context.Context) error {
+	return admitScript.Load(ctx, s.rdb).Err()
+}
+
 // admitScript checks every window, then RPM, then concurrency, atomically.
 // KEYS: conc, rpm, then each window's counter keys.
 // ARGV: now_ms, req_id, max_conc, rpm, stale_ms, n_windows, then per window

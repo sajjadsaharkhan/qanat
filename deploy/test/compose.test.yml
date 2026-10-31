@@ -71,6 +71,8 @@ services:
       GOMEMLIMIT: 400MiB
     # Acceptance tests run mock upstreams on the host; the gateway reaches
     # them as host.docker.internal (built in on Docker Desktop; mapped here on Linux).
+    # /metrics for the latency gate (make bench); nginx doesn't route it.
+    ports: ["58082:8080"]
     extra_hosts: ["host.docker.internal:host-gateway"]
     depends_on:
       redis: { condition: service_healthy }

@@ -187,10 +187,10 @@ The fixtures shipped now are **synthetic** (marked in their `meta.note`). Replac
 
 ## Benchmarks and the latency gate
 
-`cmd/loadgen` sends the same streaming request to the mock upstream directly and through the gateway (via Nginx), with concurrency, and compares TTFT distributions. `make bench` first runs `cmd/benchseed`, which seeds a bench user, Plan, mapping, price and an account pointing at the compose `mockupstream`, and hands loadgen a fresh key. It fails when:
+`cmd/loadgen` sends the same streaming request to the mock upstream directly and through the gateway (via Nginx), with concurrency, and compares TTFT distributions. `make bench` first runs `cmd/benchseed`, which seeds a bench user, Plan, mapping, price and an account pointing at the compose `mockupstream`, and hands loadgen a fresh key. The gate reads the gateway's own overhead histogram (`qanat_gateway_overhead_seconds`, client TTFT minus upstream TTFT) from the test gateway's `/metrics` on port 58082, before and after the gateway run. The client-side difference of the two TTFT p99s is reported too, but it doesn't gate: each side's tail swings by tens of milliseconds with the upstream's replayed ~420 ms first byte, so the difference can't resolve 10 ms. It fails when:
 
-- overhead p99 exceeds 10 ms (`-budget-p99`), or
-- overhead p99 regresses more than 10% against `bench/baseline.json` (REQ-PERF-05), or
+- fewer than 99% of requests have gateway overhead within 10 ms (`-budget-p99`), or
+- the gateway-measured overhead p99 regresses more than 10% against `bench/baseline.json` (REQ-PERF-05), or
 - any request errors.
 
 The result is uploaded as a CI artifact. Promote a new baseline deliberately by committing `bench/result.json` as `bench/baseline.json`.
