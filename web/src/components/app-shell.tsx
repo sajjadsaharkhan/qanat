@@ -56,15 +56,32 @@ const userNav: NavItem[] = [
   { href: "/setup", label: "Setup", icon: SquareTerminal },
 ];
 
-const adminNav: NavItem[] = [
-  { href: "/admin/users", label: "Users", icon: Users },
-  { href: "/admin/usage", label: "Usage & quotas", icon: ChartColumnStacked },
-  { href: "/admin/plans", label: "Plans", icon: Wallet },
-  { href: "/admin/accounts", label: "Accounts", icon: Server },
-  { href: "/admin/proxies", label: "Proxies", icon: Network },
-  { href: "/admin/network", label: "Network", icon: Radar },
-  { href: "/admin/models", label: "Models", icon: Shapes },
-  { href: "/admin/audit", label: "Audit log", icon: ScrollText },
+// Admin sections, grouped by what they manage: who gets access and how much,
+// where requests go upstream, and how the gateway is behaving.
+const adminNav: { label: string; items: NavItem[] }[] = [
+  {
+    label: "People",
+    items: [
+      { href: "/admin/users", label: "Users", icon: Users },
+      { href: "/admin/plans", label: "Plans", icon: Wallet },
+      { href: "/admin/usage", label: "Usage & quotas", icon: ChartColumnStacked },
+    ],
+  },
+  {
+    label: "Providers",
+    items: [
+      { href: "/admin/accounts", label: "Accounts", icon: Server },
+      { href: "/admin/models", label: "Models", icon: Shapes },
+      { href: "/admin/proxies", label: "Proxies", icon: Network },
+    ],
+  },
+  {
+    label: "Operations",
+    items: [
+      { href: "/admin/network", label: "Network", icon: Radar },
+      { href: "/admin/audit", label: "Audit log", icon: ScrollText },
+    ],
+  },
 ];
 
 function isActive(pathname: string, href: string) {
@@ -164,7 +181,7 @@ export function AppShell({ me, children }: { me: Me; children: ReactNode }) {
         </SidebarHeader>
         <SidebarContent>
           <NavGroup items={userNav} />
-          {me.role === "admin" && <NavGroup label="Admin" items={adminNav} />}
+          {me.role === "admin" && adminNav.map((g) => <NavGroup key={g.label} label={g.label} items={g.items} />)}
         </SidebarContent>
       </Sidebar>
       <SidebarInset className="min-w-0">
