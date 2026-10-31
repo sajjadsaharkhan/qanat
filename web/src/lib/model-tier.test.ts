@@ -10,6 +10,7 @@ describe("modelTier", () => {
     ["cx/gpt-5.5", "gpt"],
     ["gpt-5.3-codex", "gpt"],
     ["ag/gemini-3-pro", "gemini"],
+    ["ag/gemini-3.8-flash-high[1m]", "gemini"],
     ["my-combo", "other"],
   ] as const)("%s → %s", (name, tier) => expect(modelTier(name)).toBe(tier));
 });

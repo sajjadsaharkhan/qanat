@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, errorMessage } from "@/lib/api/client";
 import { tierDotClass, modelTier } from "@/lib/model-tier";
-import { type ClaudeFamily, claudeFamilies, latestClaude, settingsSnippet, settingsTemplate, testCommand } from "@/lib/snippet";
+import { type ClaudeFamily, claudeFamilies, latestClaude, settingsSnippet, settingsTemplate, setupModelName, testCommand } from "@/lib/snippet";
 
 const placeholder = "qnt_live_YOUR_KEY";
 const none = "__none__";
@@ -38,7 +38,7 @@ async function fetchModels(key: string): Promise<string[]> {
   });
   const body = await res.json().catch(() => null);
   if (!res.ok) throw new Error(body?.error?.message ?? `The gateway answered ${res.status}.`);
-  return (body?.data ?? []).map((m: { id: string }) => m.id);
+  return (body?.data ?? []).map((m: { id: string }) => setupModelName(m.id));
 }
 
 /** /v1/models names by provider prefix; unprefixed names are mapping rules and combos. */
@@ -256,7 +256,8 @@ export default function SetupPage() {
           />
           <p className="mt-2 max-w-[72ch] text-muted-foreground">
             Only the newest Claude Opus, Sonnet and Haiku carry <code className="font-mono">behavesAs</code>; other models appear in the
-            picker as they are.
+            picker as they are. Models supporting 1M context (like Gemini) include the <code className="font-mono">[1m]</code> suffix
+            required by Claude Code.
           </p>
         </>
       )}

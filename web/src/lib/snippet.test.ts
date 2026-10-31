@@ -1,5 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { latestClaude, prettyModelName, settingsTemplate } from "./snippet";
+import { latestClaude, prettyModelName, settingsTemplate, setupModelName, supports1M } from "./snippet";
+
+describe("supports1M and setupModelName", () => {
+  it("detects 1M models and appends [1m]", () => {
+    expect(supports1M("ag/gemini-3.8-flash-high")).toBe(true);
+    expect(supports1M("ag/gemini-3.8-flash-high[1m]")).toBe(true);
+    expect(supports1M("cc/claude-sonnet-4-5")).toBe(false);
+    expect(supports1M("cx/gpt-5.5")).toBe(false);
+
+    expect(setupModelName("ag/gemini-3.8-flash-high")).toBe("ag/gemini-3.8-flash-high[1m]");
+    expect(setupModelName("ag/gemini-3.8-flash-high[1m]")).toBe("ag/gemini-3.8-flash-high[1m]");
+    expect(setupModelName("cc/claude-sonnet-4-5")).toBe("cc/claude-sonnet-4-5");
+    expect(setupModelName("cx/gpt-5.5")).toBe("cx/gpt-5.5");
+  });
+});
 
 describe("latestClaude", () => {
   it("picks the newest of each family, numerically", () => {
@@ -52,6 +66,27 @@ describe("settingsTemplate", () => {
       opus: undefined,
     });
   });
+
+  it("appends [1m] to 1M context models in modelPicker and default slots", () => {
+    const out = JSON.parse(
+      settingsTemplate({
+        gatewayUrl: "https://gw",
+        key: "k",
+        slots: {
+          opus: "",
+          sonnet: "ag/gemini-3.8-flash-high",
+          haiku: "",
+        },
+        models: ["ag/gemini-3.8-flash-high", "ag/gemini-3.8-flash-high[1m]"],
+      }),
+    );
+    expect(out.env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe("ag/gemini-3.8-flash-high[1m]");
+    expect(out.modelPicker.options[0]).toEqual({
+      model: "ag/gemini-3.8-flash-high[1m]",
+      label: "Gemini 3.8 Flash High",
+      description: "Gemini 3.8 Flash High via Qanat (Antigravity)",
+    });
+  });
 });
 
 describe("prettyModelName", () => {
@@ -59,5 +94,7 @@ describe("prettyModelName", () => {
     ["cc/claude-sonnet-5-5", "Claude Sonnet 5.5"],
     ["claude-3-5-haiku-20241022", "Claude 3.5 Haiku 20241022"],
     ["cx/gpt-5.5", "Gpt 5.5"],
+    ["ag/gemini-3.8-flash-high[1m]", "Gemini 3.8 Flash High"],
+    ["gemini-3.8-flash-high[1m]", "Gemini 3.8 Flash High"],
   ])("%s → %s", (m, want) => expect(prettyModelName(m)).toBe(want));
 });

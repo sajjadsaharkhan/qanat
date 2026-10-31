@@ -32,6 +32,27 @@ export type PickerOption = {
 export type ClaudeFamily = "opus" | "sonnet" | "haiku";
 export const claudeFamilies: ClaudeFamily[] = ["opus", "sonnet", "haiku"];
 
+/**
+ * Whether a model supports a 1M-token context window. Currently Google Gemini
+ * models (served via Antigravity) natively support 1M context.
+ */
+export function supports1M(model: string): boolean {
+  return /gemini/i.test(model) || /\[1m\]$/i.test(model);
+}
+
+/**
+ * Appends Claude Code's "[1m]" context suffix to models that support a 1M
+ * context window (e.g. "ag/gemini-3.8-flash-high[1m]"). Claude Code requires
+ * this suffix to allow sessions to grow beyond 200k tokens without auto-compacting
+ * or warning.
+ */
+export function setupModelName(model: string): string {
+  if (supports1M(model) && !model.toLowerCase().endsWith("[1m]")) {
+    return `${model}[1m]`;
+  }
+  return model;
+}
+
 /** The model without its provider prefix: "cc/claude-opus-4-7" → "claude-opus-4-7". */
 export function bareModel(model: string): string {
   return model.slice(model.indexOf("/") + 1);
@@ -44,7 +65,7 @@ export function bareModel(model: string): string {
  * snapshot date, and an undated alias outranks its dated twin.
  */
 function claudeRank(model: string, family: ClaudeFamily): number[] | null {
-  const bare = bareModel(model);
+  const bare = bareModel(model).replace(/\[1m\]$/i, "");
   if (!bare.startsWith("claude-") || !bare.split("-").includes(family)) return null;
   const parts = bare.split("-").filter((p) => /^\d+$/.test(p));
   const date = parts.find((p) => p.length === 8);
@@ -81,11 +102,12 @@ export function latestClaude(models: string[]): Partial<Record<ClaudeFamily, str
   return out;
 }
 
-/** "cc/claude-sonnet-5-5" → "Claude Sonnet 5.5"; prefix dropped, snapshot dates kept. */
+/** "cc/claude-sonnet-5-5" → "Claude Sonnet 5.5"; prefix and [1m] dropped, snapshot dates kept. */
 export function prettyModelName(model: string): string {
   const words: string[] = [];
   let version = false;
-  for (const part of bareModel(model).split("-")) {
+  const bare = bareModel(model).replace(/\[1m\]$/i, "");
+  for (const part of bare.split("-")) {
     const short = /^\d{1,2}$/.test(part);
     if (short && version) words[words.length - 1] += `.${part}`;
     else words.push(/^\d/.test(part) ? part : part.charAt(0).toUpperCase() + part.slice(1));
@@ -105,10 +127,12 @@ const providerNames: Record<string, string> = {
  * modelPicker with the chosen /v1/models names. Only the newest Claude
  * opus/sonnet/haiku carry behavesAs (their own bare id), so Claude Code
  * applies those models' capabilities; every other option goes without.
+ * 1M context models (like Gemini) carry the [1m] suffix required by Claude Code.
  */
 export function settingsTemplate(opts: { gatewayUrl: string; key: string; slots: Record<ClaudeFamily, string>; models: string[] }): string {
   const latest = new Set(Object.values(latestClaude(opts.models)));
-  const options: PickerOption[] = opts.models.map((model) => {
+  const options: PickerOption[] = opts.models.map((rawModel) => {
+    const model = setupModelName(rawModel);
     const prefix = model.includes("/") ? model.slice(0, model.indexOf("/")) : "";
     const via = providerNames[prefix] ? `Qanat (${providerNames[prefix]})` : "Qanat";
     const option: PickerOption = {
@@ -116,7 +140,9 @@ export function settingsTemplate(opts: { gatewayUrl: string; key: string; slots:
       label: prettyModelName(model),
       description: `${prettyModelName(model)} via ${via}`,
     };
-    if (latest.has(model)) option.behavesAs = bareModel(model);
+    if (latest.has(rawModel) || latest.has(model)) {
+      option.behavesAs = bareModel(rawModel).replace(/\[1m\]$/i, "");
+    }
     return option;
   });
   const env: Record<string, string> = {
@@ -124,8 +150,8 @@ export function settingsTemplate(opts: { gatewayUrl: string; key: string; slots:
     ANTHROPIC_BASE_URL: opts.gatewayUrl,
     API_TIMEOUT_MS: "3000000",
   };
-  if (opts.slots.haiku) env.ANTHROPIC_DEFAULT_HAIKU_MODEL = opts.slots.haiku;
-  if (opts.slots.sonnet) env.ANTHROPIC_DEFAULT_SONNET_MODEL = opts.slots.sonnet;
-  if (opts.slots.opus) env.ANTHROPIC_DEFAULT_OPUS_MODEL = opts.slots.opus;
+  if (opts.slots.haiku) env.ANTHROPIC_DEFAULT_HAIKU_MODEL = setupModelName(opts.slots.haiku);
+  if (opts.slots.sonnet) env.ANTHROPIC_DEFAULT_SONNET_MODEL = setupModelName(opts.slots.sonnet);
+  if (opts.slots.opus) env.ANTHROPIC_DEFAULT_OPUS_MODEL = setupModelName(opts.slots.opus);
   return JSON.stringify({ env, modelPicker: { options } }, null, 2);
 }
