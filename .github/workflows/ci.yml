@@ -3,15 +3,84 @@ name: ci
 on:
   push: { branches: [main] }
   pull_request:
+  workflow_dispatch:
 
+# Superseded PR runs are cancelled. Pushes to main are left alone so an
+# in-flight image publish or deploy is never aborted.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
 
 jobs:
+  # ── Change detection: skip the halves a change can't affect ────────────────
+  changes:
+    name: detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      backend: ${{ steps.out.outputs.backend }}
+      web: ${{ steps.out.outputs.web }}
+      deploy: ${{ steps.out.outputs.deploy }}
+      images: ${{ steps.out.outputs.images }}
+      any-image: ${{ steps.out.outputs.any-image }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'cmd/**'
+              - 'internal/**'
+              - 'test/**'
+              - 'bench/**'
+              - 'go.mod'
+              - 'go.sum'
+              - 'Dockerfile'
+              - '.dockerignore'
+              - 'deploy/test/**'
+              - 'Makefile'
+              - '.github/workflows/ci.yml'
+            web:
+              - 'web/**'
+              - '.github/workflows/ci.yml'
+            deploy:
+              - 'deploy/prod/**'
+      # A manual run builds, tests and deploys everything. Otherwise the image
+      # matrix holds only the images whose source changed.
+      - name: outputs
+        id: out
+        env:
+          ALL: ${{ github.event_name == 'workflow_dispatch' }}
+          BACKEND: ${{ steps.filter.outputs.backend }}
+          WEB: ${{ steps.filter.outputs.web }}
+          DEPLOY: ${{ steps.filter.outputs.deploy }}
+        run: |
+          [ "$ALL" = true ] && BACKEND=true WEB=true DEPLOY=true
+          matrix='[]'
+          [ "$BACKEND" = true ] && matrix=$(jq -c '. + [{"name":"qanat","context":".","target":"qanat"}]' <<<"$matrix")
+          [ "$WEB" = true ] && matrix=$(jq -c '. + [{"name":"web","context":"web","target":"web"}]' <<<"$matrix")
+          {
+            echo "backend=$BACKEND"
+            echo "web=$WEB"
+            echo "deploy=$DEPLOY"
+            echo "images=$matrix"
+            echo "any-image=$([ "$(jq length <<<"$matrix")" -gt 0 ] && echo true || echo false)"
+          } >> "$GITHUB_OUTPUT"
+
+  # ── Backend ────────────────────────────────────────────────────────────────
   go:
     name: go (lint, unit, race, reference acceptance)
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -23,7 +92,10 @@ jobs:
 
   integration:
     name: integration (Redis, PostgreSQL)
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       redis:
         image: redis:7.4-alpine
@@ -45,9 +117,10 @@ jobs:
 
   acceptance:
     name: acceptance + latency gate (real stack via Nginx)
-    # Activates automatically once the gateway binary exists (P0).
-    if: ${{ hashFiles('cmd/gateway/main.go') != '' }}
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -64,10 +137,14 @@ jobs:
         if: failure()
         with: { name: stack-logs, path: stack.log }
 
+  # ── Dashboard ──────────────────────────────────────────────────────────────
+  # e2e runs against the real control plane, so a backend change runs it too.
   web:
-    name: web (typecheck, unit, e2e light/dark)
-    if: ${{ hashFiles('web/package-lock.json') != '' }}
+    name: web (typecheck, lint, unit, e2e light/dark)
+    needs: changes
+    if: needs.changes.outputs.web == 'true' || needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults: { run: { working-directory: web } }
     steps:
       - uses: actions/checkout@v4
@@ -77,15 +154,90 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run test
-      # e2e needs the control plane + oidcmock, so it starts once the stack exists (P0).
       - name: start stack
-        if: ${{ hashFiles('cmd/control/main.go') != '' }}
         working-directory: .
         run: make stack-up
-      - if: ${{ hashFiles('cmd/control/main.go') != '' }}
-        run: npx playwright install --with-deps chromium
-      - if: ${{ hashFiles('cmd/control/main.go') != '' }}
-        run: npm run e2e
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e
       - uses: actions/upload-artifact@v4
         if: failure()
         with: { name: playwright-report, path: web/playwright-report }
+
+  # ── Images: build and push to GHCR ─────────────────────────────────────────
+  docker:
+    name: docker (${{ matrix.image.name }})
+    needs: [changes, go, integration, acceptance, web]
+    # Only on pushes, only for images whose source changed, and only when no
+    # test job failed (skipped ones are fine).
+    if: >-
+      github.event_name != 'pull_request'
+      && needs.changes.outputs.any-image == 'true'
+      && !failure() && !cancelled()
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.changes.outputs.images) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/${{ matrix.image.name }}
+          tags: |
+            type=sha,prefix=
+            type=ref,event=branch
+            type=raw,value=latest,enable={{is_default_branch}}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.image.context }}
+          target: ${{ matrix.image.target }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.image.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}
+
+  # ── Deploy: deploy/prod/deploy.sh on the server's self-hosted runner ───────
+  # Pushes to main only, when images were published or deploy/prod changed.
+  # It always deploys `latest`: the sha tag exists only for images that were
+  # rebuilt. `!failure() && !cancelled()` stands in for success(), which is
+  # false whenever an upstream job was skipped.
+  deploy:
+    name: deploy (production)
+    needs: [changes, docker]
+    if: >-
+      !failure() && !cancelled()
+      && github.event_name != 'pull_request'
+      && github.ref == 'refs/heads/main'
+      && (needs.changes.outputs.any-image == 'true' || needs.changes.outputs.deploy == 'true')
+    runs-on: self-hosted
+    timeout-minutes: 45 # the gateway drains streams for up to 10 minutes
+    environment: production
+    # Never two deploys at once, and never cancel one mid-flight.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    steps:
+      # deploy.sh needs the server's .env and secrets (not in git), so it runs
+      # in the existing server checkout, not the runner's throwaway workspace.
+      # Set the repository variable DEPLOY_PATH to that directory.
+      - name: update server checkout
+        working-directory: ${{ vars.DEPLOY_PATH }}
+        run: |
+          git fetch origin main
+          git checkout main
+          git reset --hard origin/main
+      - name: deploy
+        working-directory: ${{ vars.DEPLOY_PATH }}
+        run: deploy/prod/deploy.sh

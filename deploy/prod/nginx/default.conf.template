@@ -1,0 +1,74 @@
+# Qanat edge, rendered at start by the nginx image (${QANAT_DOMAIN} filled in).
+# TLS ends in front of this nginx; it listens on plain HTTP.
+
+# Keep the scheme the TLS proxy saw, so control and web build https URLs.
+map $http_x_forwarded_proto $qanat_proto {
+    default $http_x_forwarded_proto;
+    ""      $scheme;
+}
+
+upstream qanat_gateway {
+    server gateway:8080;
+    keepalive 64;
+}
+
+upstream qanat_control {
+    server control:8081;
+    keepalive 16;
+}
+
+upstream qanat_web {
+    server web:3000;
+    keepalive 16;
+}
+
+# Requests for any other Host are dropped.
+server {
+    listen 80 default_server;
+    location = /nginx-health { access_log off; return 200 "ok\n"; }
+    location / { return 444; }
+}
+
+server {
+    listen 80;
+    server_name ${QANAT_DOMAIN};
+
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $qanat_proto;
+    proxy_set_header X-Forwarded-Host $host;
+
+    # Gateway: PRD §12.1 SSE settings. The trailing slash on proxy_pass strips
+    # /gateway, so /gateway/v1/messages reaches the gateway as /v1/messages.
+    location /gateway/ {
+        proxy_pass http://qanat_gateway/;
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_cache off;
+        gzip off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        client_max_body_size 32m;
+        tcp_nodelay on;
+        proxy_pass_header X-Accel-Buffering;
+    }
+
+    # Never public (PRD §12.1): Prometheus scrapes gateway:8080/metrics on
+    # the internal network. /test/ exists only in QANAT_TEST_MODE.
+    location = /gateway/metrics { return 404; }
+    location /gateway/test/ { return 404; }
+
+    # Control plane Admin API, paths unchanged (control serves /api/...).
+    location /api/ {
+        proxy_pass http://qanat_control;
+        client_max_body_size 4m;
+    }
+
+    # Dashboard.
+    location / {
+        proxy_pass http://qanat_web;
+    }
+}

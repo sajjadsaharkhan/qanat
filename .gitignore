@@ -13,7 +13,10 @@
 # Local env
 .env
 .env.*
+!.env.example
 # macOS
 .DS_Store
 /deploy/local/secrets/
+/deploy/prod/secrets/
+/deploy/prod/backups/
 /web/tsconfig.tsbuildinfo

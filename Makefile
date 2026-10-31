@@ -7,7 +7,8 @@ INTEGRATION_ENV := QANAT_TEST_REDIS_ADDR=localhost:56379 \
 
 .PHONY: help test test-race test-reference test-integration test-acceptance bench \
         golden-update fixtures-check lint deps-up deps-down stack-up stack-down \
-        web-test web-e2e ci sqlc local-up local-down local-logs local-reset local-demo local-demo-clean
+        web-test web-e2e ci sqlc local-up local-down local-logs local-reset local-demo local-demo-clean \
+        prod-secrets prod-up prod-down prod-logs prod-backup prod-deploy
 
 help: ## List targets
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | awk -F':.*?## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -111,3 +112,53 @@ local-demo-clean: ## Remove the demo data again (your own data is kept)
 
 local-reset: ## Stop the local stack and delete its data
 	$(LOCAL) down -v
+
+# --- Server deploy (deploy/prod, docs/deploy.md) ------------------------------
+PROD := docker compose -f deploy/prod/compose.yml
+PROD_SECRETS := deploy/prod/secrets
+
+# The folder is 0700 so other host users can't read it; the files are 0644 so
+# the containers' own users (uid 10001, postgres) can read their bind mounts.
+$(PROD_SECRETS):
+	@mkdir -p $@ && chmod 700 $@
+
+$(PROD_SECRETS)/root_password $(PROD_SECRETS)/master_key: | $(PROD_SECRETS)
+	@openssl rand -base64 $(if $(findstring master,$@),32,24) | tr -d '\n' > $@ && chmod 644 $@
+	@echo "Generated $@"
+
+# Hex keeps the password safe inside the DSN URL.
+$(PROD_SECRETS)/postgres_password: | $(PROD_SECRETS)
+	@openssl rand -hex 24 | tr -d '\n' > $@ && chmod 644 $@
+	@echo "Generated $@"
+
+$(PROD_SECRETS)/postgres_dsn: $(PROD_SECRETS)/postgres_password
+	@printf 'postgres://qanat:%s@postgres:5432/qanat?sslmode=disable' "$$(cat $<)" > $@ && chmod 644 $@
+
+$(PROD_SECRETS)/oidc_client_secret: | $(PROD_SECRETS) # empty = public Keycloak client
+	@touch $@ && chmod 644 $@
+
+PROD_SECRET_FILES := $(addprefix $(PROD_SECRETS)/,root_password master_key postgres_password postgres_dsn oidc_client_secret)
+
+prod-secrets: $(PROD_SECRET_FILES) ## Create missing server secrets (existing ones are kept)
+
+prod-up: $(PROD_SECRET_FILES) ## Build on the server and start Qanat (needs deploy/prod/.env)
+	@test -f deploy/prod/.env || (echo "Copy deploy/prod/.env.example to deploy/prod/.env and fill it in" && exit 1)
+	$(PROD) up -d --build --wait
+	@. deploy/prod/.env && echo "" && \
+	  echo "  Dashboard  https://$$QANAT_DOMAIN" && \
+	  echo "  Gateway    https://$$QANAT_DOMAIN/gateway  (ANTHROPIC_BASE_URL)" && \
+	  echo "  Sign in    username root, password in $(PROD_SECRETS)/root_password" && echo ""
+
+prod-deploy: ## Pull CI images and restart (TAG=<sha> to pin or roll back)
+	deploy/prod/deploy.sh $(TAG)
+
+prod-down: ## Stop the server stack (keeps data)
+	$(PROD) down
+
+prod-logs: ## Follow server stack logs
+	$(PROD) logs -f
+
+prod-backup: ## pg_dump the server database to deploy/prod/backups/
+	@mkdir -p deploy/prod/backups && umask 077 && \
+	  $(PROD) exec -T postgres pg_dump -U qanat -d qanat -Fc > deploy/prod/backups/qanat-$$(date +%Y%m%d-%H%M%S).dump
+	@ls -t deploy/prod/backups | head -1
