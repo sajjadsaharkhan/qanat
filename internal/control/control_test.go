@@ -408,6 +408,27 @@ func TestOIDCLogin_Flow(t *testing.T) {
 	if me.Email != "bootstrap-admin@example.com" || me.Role != "admin" {
 		t.Fatalf("admin /api/me: %+v", me)
 	}
+
+	// 4. A disabled user stays disabled when signing in again
+	if _, err := pg.Exec(context.Background(), `UPDATE users SET disabled_at = now() WHERE email = 'dev@example.com'`); err != nil {
+		t.Fatal(err)
+	}
+	jar, _ = cookiejar.New(nil)
+	client.Jar = jar
+	idp.LoginAs(oidctest.Claims{Subject: "dev-sub-1", Email: "dev@example.com", Name: "Dev User", Groups: []string{"qanat-users"}})
+	resp, err = client.Get(srv.URL + "/api/auth/oidc/login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "/access-denied?reason=disabled" {
+		t.Fatalf("disabled redirect: status=%d, location=%q", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	var disabled bool
+	pg.QueryRow(context.Background(), `SELECT disabled_at IS NOT NULL FROM users WHERE email = 'dev@example.com'`).Scan(&disabled)
+	if !disabled {
+		t.Fatal("sign-in re-enabled a disabled user")
+	}
 }
 
 // REQ-MAP-04: the provider registry is listed; mapping rules for prefixed

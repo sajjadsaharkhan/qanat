@@ -704,6 +704,73 @@ export interface paths {
         patch: operations["updateUser"];
         trace?: never;
     };
+    "/api/admin/users/{id}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Disable a user (reversible, keys kept) or ban them (every key revoked, reason required) */
+        post: operations["disableUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/users/{id}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Lift a disable or ban; keys revoked by a ban stay revoked */
+        post: operations["enableUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/users/{id}/quotas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["userQuotas"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/users/{id}/quota/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Zero the chosen quota windows' current counters; recorded usage stays */
+        post: operations["resetQuota"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/plans": {
         parameters: {
             query?: never;
@@ -994,12 +1061,32 @@ export interface components {
             active_keys: number;
             /** Format: date-time */
             created_at: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description Set while an admin has disabled or banned the user
+             */
             disabled_at: string | null;
+            /**
+             * Format: date-time
+             * @description Set when the disable is a ban
+             */
+            banned_at: string | null;
+            disabled_reason: string;
         };
         UpdateUserRequest: {
             role?: components["schemas"]["Role"];
             plan_id?: string;
+        };
+        DisableUserRequest: {
+            /** @description Also revoke every API key; needs a reason */
+            ban?: boolean;
+            reason?: string;
+        };
+        ResetQuotaRequest: {
+            windows: {
+                window: components["schemas"]["WindowKind"];
+                model_scope: string | null;
+            }[];
         };
         PlanQuota: {
             window: components["schemas"]["WindowKind"];
@@ -2824,6 +2911,103 @@ export interface operations {
         };
         responses: {
             /** @description Updated */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    disableUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DisableUserRequest"];
+            };
+        };
+        responses: {
+            /** @description Disabled */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    enableUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Enabled */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    userQuotas: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Quotas"];
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    resetQuota: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResetQuotaRequest"];
+            };
+        };
+        responses: {
+            /** @description Reset */
             204: {
                 headers: {
                     [name: string]: unknown;

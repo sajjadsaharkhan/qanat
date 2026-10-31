@@ -131,6 +131,10 @@ func (s *Server) Register(mux *http.ServeMux) {
 
 	mux.Handle("GET /api/admin/users", admin(s.listUsers))
 	mux.Handle("PATCH /api/admin/users/{id}", admin(s.updateUser))
+	mux.Handle("POST /api/admin/users/{id}/disable", admin(s.disableUser))
+	mux.Handle("POST /api/admin/users/{id}/enable", admin(s.enableUser))
+	mux.Handle("GET /api/admin/users/{id}/quotas", admin(s.userQuotas))
+	mux.Handle("POST /api/admin/users/{id}/quota/reset", admin(s.resetQuota))
 	mux.Handle("GET /api/admin/plans", admin(s.listPlans))
 	mux.Handle("POST /api/admin/plans", admin(s.createPlan))
 	mux.Handle("GET /api/admin/plans/{id}", admin(s.getPlan))

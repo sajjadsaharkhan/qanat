@@ -3,7 +3,7 @@
 -- name: UpsertRootUser :one
 INSERT INTO users (email, name, username, role, plan_id)
 SELECT 'root@qanat.local', 'Root admin', 'root', 'admin', id FROM plans WHERE is_default
-ON CONFLICT (username) DO UPDATE SET role = 'admin', disabled_at = NULL
+ON CONFLICT (username) DO UPDATE SET role = 'admin', disabled_at = NULL, banned_at = NULL, disabled_reason = ''
 RETURNING id;
 
 -- name: GetUserByOIDCSubject :one
@@ -27,8 +27,7 @@ RETURNING id, role;
 UPDATE users
 SET email = sqlc.arg(email),
     name = CASE WHEN sqlc.arg(name)::text <> '' THEN sqlc.arg(name)::text ELSE users.name END,
-    oidc_subject = COALESCE(oidc_subject, sqlc.narg(oidc_subject)),
-    disabled_at = NULL
+    oidc_subject = COALESCE(oidc_subject, sqlc.narg(oidc_subject))
 WHERE id = sqlc.arg(id);
 
 -- name: GetUser :one
@@ -39,6 +38,7 @@ WHERE u.id = $1;
 
 -- name: ListUsers :many
 SELECT u.id, u.email, u.name, u.username, u.role, u.plan_id, p.name AS plan_name, u.created_at, u.disabled_at,
+       u.banned_at, u.disabled_reason,
        (SELECT count(*) FROM api_keys k WHERE k.user_id = u.id AND k.revoked_at IS NULL)::bigint AS active_keys
 FROM users u
 JOIN plans p ON p.id = u.plan_id
@@ -49,6 +49,19 @@ UPDATE users SET role = $2 WHERE id = $1;
 
 -- name: SetUserPlan :execrows
 UPDATE users SET plan_id = $2 WHERE id = $1;
+
+-- name: DisableUser :execrows
+UPDATE users
+SET disabled_at = COALESCE(disabled_at, now()),
+    banned_at = CASE WHEN sqlc.arg(ban)::boolean THEN now() ELSE banned_at END,
+    disabled_reason = sqlc.arg(reason)
+WHERE id = sqlc.arg(id);
+
+-- name: EnableUser :execrows
+UPDATE users SET disabled_at = NULL, banned_at = NULL, disabled_reason = '' WHERE id = $1;
+
+-- name: RevokeUserKeys :execrows
+UPDATE api_keys SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL;
 
 -- name: ListKeys :many
 SELECT id, name, prefix, expires_at, last_used_at, last_ip, revoked_at, created_at

@@ -148,6 +148,40 @@ func (q *Queries) DeletePlanQuotas(ctx context.Context, planID string) error {
 	return err
 }
 
+const disableUser = `-- name: DisableUser :execrows
+UPDATE users
+SET disabled_at = COALESCE(disabled_at, now()),
+    banned_at = CASE WHEN $1::boolean THEN now() ELSE banned_at END,
+    disabled_reason = $2
+WHERE id = $3
+`
+
+type DisableUserParams struct {
+	Ban    bool
+	Reason string
+	ID     string
+}
+
+func (q *Queries) DisableUser(ctx context.Context, arg DisableUserParams) (int64, error) {
+	result, err := q.db.Exec(ctx, disableUser, arg.Ban, arg.Reason, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const enableUser = `-- name: EnableUser :execrows
+UPDATE users SET disabled_at = NULL, banned_at = NULL, disabled_reason = '' WHERE id = $1
+`
+
+func (q *Queries) EnableUser(ctx context.Context, id string) (int64, error) {
+	result, err := q.db.Exec(ctx, enableUser, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getPlan = `-- name: GetPlan :one
 SELECT id, name, timezone, daily_anchor, weekly_anchor, monthly_anchor, is_default, updated_at
 FROM plans
@@ -573,6 +607,7 @@ func (q *Queries) ListPlans(ctx context.Context) ([]ListPlansRow, error) {
 
 const listUsers = `-- name: ListUsers :many
 SELECT u.id, u.email, u.name, u.username, u.role, u.plan_id, p.name AS plan_name, u.created_at, u.disabled_at,
+       u.banned_at, u.disabled_reason,
        (SELECT count(*) FROM api_keys k WHERE k.user_id = u.id AND k.revoked_at IS NULL)::bigint AS active_keys
 FROM users u
 JOIN plans p ON p.id = u.plan_id
@@ -580,16 +615,18 @@ ORDER BY u.created_at
 `
 
 type ListUsersRow struct {
-	ID         string
-	Email      string
-	Name       string
-	Username   *string
-	Role       string
-	PlanID     string
-	PlanName   string
-	CreatedAt  time.Time
-	DisabledAt *time.Time
-	ActiveKeys int64
+	ID             string
+	Email          string
+	Name           string
+	Username       *string
+	Role           string
+	PlanID         string
+	PlanName       string
+	CreatedAt      time.Time
+	DisabledAt     *time.Time
+	BannedAt       *time.Time
+	DisabledReason string
+	ActiveKeys     int64
 }
 
 func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
@@ -611,6 +648,8 @@ func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
 			&i.PlanName,
 			&i.CreatedAt,
 			&i.DisabledAt,
+			&i.BannedAt,
+			&i.DisabledReason,
 			&i.ActiveKeys,
 		); err != nil {
 			return nil, err
@@ -645,6 +684,18 @@ func (q *Queries) RevokeKey(ctx context.Context, arg RevokeKeyParams) (RevokeKey
 	var i RevokeKeyRow
 	err := row.Scan(&i.ID, &i.Name, &i.Prefix)
 	return i, err
+}
+
+const revokeUserKeys = `-- name: RevokeUserKeys :execrows
+UPDATE api_keys SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL
+`
+
+func (q *Queries) RevokeUserKeys(ctx context.Context, userID string) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeUserKeys, userID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setUserPlan = `-- name: SetUserPlan :execrows
@@ -685,8 +736,7 @@ const updateOIDCUser = `-- name: UpdateOIDCUser :exec
 UPDATE users
 SET email = $1,
     name = CASE WHEN $2::text <> '' THEN $2::text ELSE users.name END,
-    oidc_subject = COALESCE(oidc_subject, $3),
-    disabled_at = NULL
+    oidc_subject = COALESCE(oidc_subject, $3)
 WHERE id = $4
 `
 
@@ -757,7 +807,7 @@ const upsertRootUser = `-- name: UpsertRootUser :one
 
 INSERT INTO users (email, name, username, role, plan_id)
 SELECT 'root@qanat.local', 'Root admin', 'root', 'admin', id FROM plans WHERE is_default
-ON CONFLICT (username) DO UPDATE SET role = 'admin', disabled_at = NULL
+ON CONFLICT (username) DO UPDATE SET role = 'admin', disabled_at = NULL, banned_at = NULL, disabled_reason = ''
 RETURNING id
 `
 

@@ -30,6 +30,9 @@ type userResponse struct {
 	ActiveKeys int64      `json:"active_keys"`
 	CreatedAt  time.Time  `json:"created_at"`
 	DisabledAt *time.Time `json:"disabled_at"`
+	BannedAt   *time.Time `json:"banned_at"`
+	// DisabledReason is the admin's note when disabling; required for a ban.
+	DisabledReason string `json:"disabled_reason"`
 }
 
 func (s *Server) listUsers(w http.ResponseWriter, r *http.Request, _ *db.GetUserRow) {
@@ -40,7 +43,7 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request, _ *db.GetUser
 	}
 	out := make([]userResponse, 0, len(rows))
 	for _, u := range rows {
-		out = append(out, userResponse{u.ID, u.Email, u.Name, u.Username, u.Role, u.PlanID, u.PlanName, u.ActiveKeys, u.CreatedAt, u.DisabledAt})
+		out = append(out, userResponse{u.ID, u.Email, u.Name, u.Username, u.Role, u.PlanID, u.PlanName, u.ActiveKeys, u.CreatedAt, u.DisabledAt, u.BannedAt, u.DisabledReason})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -102,6 +105,194 @@ func (s *Server) updateUser(w http.ResponseWriter, r *http.Request, actor *db.Ge
 		s.audit(ctx, &actor.ID, "user.plan", "user", target.ID,
 			map[string]string{"plan_id": target.PlanID, "plan": target.PlanName}, map[string]string{"plan_id": plan.ID, "plan": plan.Name})
 	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// userTarget loads the {id} user for an admin action, refusing the root
+// admin and the acting admin themselves. It writes the error when it fails.
+func (s *Server) userTarget(w http.ResponseWriter, r *http.Request, actor *db.GetUserRow, verb string) (db.GetUserRow, bool) {
+	target, err := s.q.GetUser(r.Context(), r.PathValue("id"))
+	if notFound(err) || isBadUUID(err) {
+		fail(w, http.StatusNotFound, "not_found", "That user doesn't exist.")
+		return target, false
+	}
+	if err != nil {
+		s.internal(w, r, err)
+		return target, false
+	}
+	if target.Username != nil && *target.Username == "root" {
+		fail(w, http.StatusBadRequest, "root_user", "The root admin can't be "+verb+".")
+		return target, false
+	}
+	if target.ID == actor.ID {
+		fail(w, http.StatusBadRequest, "own_account", "You can't do this to your own account. Ask another admin.")
+		return target, false
+	}
+	return target, true
+}
+
+type disableUserRequest struct {
+	Ban    bool   `json:"ban"`
+	Reason string `json:"reason"`
+}
+
+// disableUser blocks a user from the dashboard and the gateway. A ban also
+// revokes every API key and needs a reason; Enable doesn't bring keys back.
+func (s *Server) disableUser(w http.ResponseWriter, r *http.Request, actor *db.GetUserRow) {
+	var req disableUserRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	req.Reason = strings.TrimSpace(req.Reason)
+	if req.Ban && req.Reason == "" {
+		fail(w, http.StatusBadRequest, "reason_required", "Say why you're banning this user. The reason is kept in the audit log.")
+		return
+	}
+	if len(req.Reason) > 500 {
+		fail(w, http.StatusBadRequest, "reason_too_long", "Keep the reason under 500 characters.")
+		return
+	}
+	verb := "disabled"
+	if req.Ban {
+		verb = "banned"
+	}
+	target, ok := s.userTarget(w, r, actor, verb)
+	if !ok {
+		return
+	}
+	ctx := r.Context()
+	var revoked int64
+	err := pgx.BeginFunc(ctx, s.pg, func(tx pgx.Tx) error {
+		q := s.q.WithTx(tx)
+		if _, err := q.DisableUser(ctx, db.DisableUserParams{ID: target.ID, Ban: req.Ban, Reason: req.Reason}); err != nil {
+			return err
+		}
+		if !req.Ban {
+			return nil
+		}
+		var err error
+		revoked, err = q.RevokeUserKeys(ctx, target.ID)
+		return err
+	})
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	action := "user.disable"
+	after := map[string]any{"reason": req.Reason}
+	if req.Ban {
+		action = "user.ban"
+		after["keys_revoked"] = revoked
+	}
+	s.audit(ctx, &actor.ID, action, "user", target.ID, map[string]bool{"disabled": target.DisabledAt != nil}, after)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// enableUser lifts a disable or ban. Keys revoked by a ban stay revoked.
+func (s *Server) enableUser(w http.ResponseWriter, r *http.Request, actor *db.GetUserRow) {
+	target, ok := s.userTarget(w, r, actor, "enabled")
+	if !ok {
+		return
+	}
+	if target.DisabledAt == nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	ctx := r.Context()
+	if _, err := s.q.EnableUser(ctx, target.ID); err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	s.audit(ctx, &actor.ID, "user.enable", "user", target.ID, map[string]bool{"disabled": true}, map[string]bool{"disabled": false})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// userQuotas is a user's quota windows as the admin sees them before a reset.
+func (s *Server) userQuotas(w http.ResponseWriter, r *http.Request, _ *db.GetUserRow) {
+	ctx := r.Context()
+	target, err := s.q.GetUser(ctx, r.PathValue("id"))
+	if notFound(err) || isBadUUID(err) {
+		fail(w, http.StatusNotFound, "not_found", "That user doesn't exist.")
+		return
+	}
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	out, err := s.quotasFor(ctx, target.ID, target.PlanID)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+type resetQuotaRequest struct {
+	Windows []struct {
+		Window     quota.Kind `json:"window"`
+		ModelScope *string    `json:"model_scope"`
+	} `json:"windows"`
+}
+
+// resetQuota zeroes the chosen windows' current counters (PRD §10.3 manual
+// reset). Recorded usage and reports are untouched; only headroom returns.
+func (s *Server) resetQuota(w http.ResponseWriter, r *http.Request, actor *db.GetUserRow) {
+	var req resetQuotaRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	if len(req.Windows) == 0 {
+		fail(w, http.StatusBadRequest, "no_windows", "Pick at least one quota window to reset.")
+		return
+	}
+	ctx := r.Context()
+	target, err := s.q.GetUser(ctx, r.PathValue("id"))
+	if notFound(err) || isBadUUID(err) {
+		fail(w, http.StatusNotFound, "not_found", "That user doesn't exist.")
+		return
+	}
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	cur, err := s.quotasFor(ctx, target.ID, target.PlanID)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	plan, err := s.q.GetPlan(ctx, target.PlanID)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	a := anchorsOf(plan.Timezone, plan.DailyAnchor.Microseconds, plan.WeeklyAnchor, plan.MonthlyAnchor)
+	now := s.now()
+	var keys []string
+	type resetNote struct {
+		Window     quota.Kind `json:"window"`
+		ModelScope *string    `json:"model_scope"`
+		UsedUSD    float64    `json:"used_usd"`
+	}
+	notes := []resetNote{}
+	for _, want := range req.Windows {
+		var hit *quotaWindow
+		for i, win := range cur.Windows {
+			if win.Window == want.Window && deref(win.ModelScope) == deref(want.ModelScope) {
+				hit = &cur.Windows[i]
+			}
+		}
+		if hit == nil {
+			fail(w, http.StatusBadRequest, "invalid_window", "That quota window isn't on this user's Plan. Reload and pick again.")
+			return
+		}
+		keys = append(keys, counterKeys(target.ID, hit.Window, deref(hit.ModelScope), a, now)...)
+		notes = append(notes, resetNote{hit.Window, hit.ModelScope, hit.UsedUSD})
+	}
+	if err := s.rdb.Del(ctx, keys...).Err(); err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	s.audit(ctx, &actor.ID, "user.quota_reset", "user", target.ID, map[string]any{"windows": notes}, nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 

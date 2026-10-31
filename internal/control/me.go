@@ -118,6 +118,15 @@ func (s *Server) usedMicro(ctx context.Context, userID string, k quota.Kind, sco
 	return n, nil
 }
 
+// counterKeys are the Redis counters a window's current usage sums over.
+func counterKeys(userID string, k quota.Kind, scope string, a quota.Anchors, now time.Time) []string {
+	if k == quota.Rolling5h {
+		return quota.BucketKeys(userID, scope, now)
+	}
+	start, _ := quota.Bounds(k, a, now)
+	return []string{quota.FixedKey(userID, k, scope, start)}
+}
+
 func anchorsOf(tz string, dailyMicros int64, weekday, monthDay int16) quota.Anchors {
 	loc, err := time.LoadLocation(tz)
 	if err != nil {

@@ -247,13 +247,15 @@ type UsageHourly struct {
 }
 
 type User struct {
-	ID          string
-	Email       string
-	Name        string
-	OidcSubject *string
-	Role        string
-	PlanID      string
-	CreatedAt   time.Time
-	DisabledAt  *time.Time
-	Username    *string
+	ID             string
+	Email          string
+	Name           string
+	OidcSubject    *string
+	Role           string
+	PlanID         string
+	CreatedAt      time.Time
+	DisabledAt     *time.Time
+	Username       *string
+	BannedAt       *time.Time
+	DisabledReason string
 }

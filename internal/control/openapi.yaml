@@ -491,6 +491,46 @@ paths:
         "204": { description: Updated }
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /api/admin/users/{id}/disable:
+    post:
+      operationId: disableUser
+      summary: Disable a user (reversible, keys kept) or ban them (every key revoked, reason required)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/DisableUserRequest" } } }
+      responses:
+        "204": { description: Disabled }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/admin/users/{id}/enable:
+    post:
+      operationId: enableUser
+      summary: Lift a disable or ban; keys revoked by a ban stay revoked
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "204": { description: Enabled }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/admin/users/{id}/quotas:
+    get:
+      operationId: userQuotas
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Quotas" } } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/admin/users/{id}/quota/reset:
+    post:
+      operationId: resetQuota
+      summary: Zero the chosen quota windows' current counters; recorded usage stays
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ResetQuotaRequest" } } }
+      responses:
+        "204": { description: Reset }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /api/admin/plans:
     get:
       operationId: listPlans
@@ -782,7 +822,7 @@ components:
         gateway_url: { type: string }
     User:
       type: object
-      required: [id, email, name, username, role, plan_id, plan_name, active_keys, created_at, disabled_at]
+      required: [id, email, name, username, role, plan_id, plan_name, active_keys, created_at, disabled_at, banned_at, disabled_reason]
       properties:
         id: { type: string }
         email: { type: string }
@@ -793,12 +833,32 @@ components:
         plan_name: { type: string }
         active_keys: { type: integer }
         created_at: { type: string, format: date-time }
-        disabled_at: { type: [string, "null"], format: date-time }
+        disabled_at: { type: [string, "null"], format: date-time, description: Set while an admin has disabled or banned the user }
+        banned_at: { type: [string, "null"], format: date-time, description: Set when the disable is a ban }
+        disabled_reason: { type: string }
     UpdateUserRequest:
       type: object
       properties:
         role: { $ref: "#/components/schemas/Role" }
         plan_id: { type: string }
+    DisableUserRequest:
+      type: object
+      properties:
+        ban: { type: boolean, description: Also revoke every API key; needs a reason }
+        reason: { type: string, maxLength: 500 }
+    ResetQuotaRequest:
+      type: object
+      required: [windows]
+      properties:
+        windows:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [window, model_scope]
+            properties:
+              window: { $ref: "#/components/schemas/WindowKind" }
+              model_scope: { type: [string, "null"] }
     PlanQuota:
       type: object
       required: [window, model_scope, limit_usd]

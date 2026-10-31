@@ -359,9 +359,10 @@ func (s *Server) oidcCallback(w http.ResponseWriter, r *http.Request) {
 
 	// JIT provisioning / Profile sync (REQ-AUTH-03, REQ-AUTH-04)
 	var userID string
+	disabled := false
 	u, err := s.q.GetUserByOIDCSubject(ctx, &claims.Subject)
 	if err == nil {
-		userID = u.ID
+		userID, disabled = u.ID, u.DisabledAt != nil
 		_ = s.q.UpdateOIDCUser(ctx, db.UpdateOIDCUserParams{
 			ID:          u.ID,
 			Email:       claims.Email,
@@ -371,7 +372,7 @@ func (s *Server) oidcCallback(w http.ResponseWriter, r *http.Request) {
 	} else if notFound(err) {
 		uEmail, errEmail := s.q.GetUserByEmail(ctx, claims.Email)
 		if errEmail == nil {
-			userID = uEmail.ID
+			userID, disabled = uEmail.ID, uEmail.DisabledAt != nil
 			_ = s.q.UpdateOIDCUser(ctx, db.UpdateOIDCUserParams{
 				ID:          uEmail.ID,
 				Email:       claims.Email,
@@ -400,6 +401,13 @@ func (s *Server) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		s.internal(w, r, err)
+		return
+	}
+
+	// An admin disabled or banned this user; signing in again doesn't undo it.
+	if disabled {
+		s.log.WarnContext(ctx, "oidc user denied: disabled", "user", userID)
+		http.Redirect(w, r, "/access-denied?reason=disabled", http.StatusFound)
 		return
 	}
 
