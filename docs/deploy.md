@@ -87,8 +87,13 @@ cookies are `Secure`, so signing in over plain `http://` doesn't work.
 
 ## 5. Start
 
+The server never builds images. CI builds them and publishes them to GHCR
+(§9); the server only pulls. If the packages are private, log Docker in once
+with a token that has only `read:packages`:
+`docker login ghcr.io -u <github-user>`.
+
 ```sh
-make prod-up      # builds images, creates secrets, waits until healthy
+make prod-up      # pulls images from GHCR, creates secrets, waits until healthy
 make prod-logs
 make prod-down    # stop; data stays in the postgres/redis volumes
 ```
@@ -113,7 +118,6 @@ With CI/CD (§9), every push to `main` deploys itself. By hand:
 git pull && make prod-deploy            # pull the CI images for `latest`
 make prod-deploy TAG=abc1234            # pin, or roll back to a commit's images
 deploy/prod/deploy.sh --dry-run         # show which images would run
-make prod-up                            # or build on the server instead of pulling
 ```
 
 Control applies database migrations when it starts. Migrations only go

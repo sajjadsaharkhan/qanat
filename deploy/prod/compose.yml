@@ -10,7 +10,8 @@
 # Settings come from deploy/prod/.env, secrets from deploy/prod/secrets/.
 #
 # Images: CI publishes them to GHCR and deploy/prod/deploy.sh pulls them
-# (IMAGE_TAG, default latest). `make prod-up` builds the same names locally.
+# (IMAGE_TAG, default latest). Nothing is built on the server: there are no
+# `build:` sections, so a missing image fails the deploy instead of building.
 name: qanat
 
 x-qanat-image: &qanat-image ${QANAT_IMAGE_REPO:-ghcr.io/sajjadsaharkhan/qanat}/qanat:${IMAGE_TAG:-latest}
@@ -53,7 +54,6 @@ services:
 
   control:
     image: *qanat-image
-    build: { context: ../.., target: qanat }
     command: ["control"]
     environment:
       <<: *qanat-env
@@ -78,7 +78,6 @@ services:
 
   gateway:
     image: *qanat-image
-    build: { context: ../.., target: qanat }
     command: ["gateway"]
     environment:
       <<: *qanat-env
@@ -97,7 +96,6 @@ services:
 
   web:
     image: ${QANAT_IMAGE_REPO:-ghcr.io/sajjadsaharkhan/qanat}/web:${IMAGE_TAG:-latest}
-    build: { context: ../../web }
     environment:
       QANAT_CONTROL_URL: http://control:8081
       QANAT_GATEWAY_URL: http://gateway:8080

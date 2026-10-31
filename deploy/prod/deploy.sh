@@ -56,10 +56,16 @@ fi
 # Secrets that don't exist yet are generated; existing ones are never touched.
 make -s prod-secrets
 
-# Pull first: a failed pull leaves the running version untouched.
+# Pull first: a failed pull leaves the running version untouched. Images
+# only come from GHCR; the server never builds them.
 if [ "$NO_PULL" = false ]; then
-  echo "▶ Pulling images..."
-  $COMPOSE pull --quiet
+  echo "▶ Pulling images from GHCR..."
+  if ! $COMPOSE pull --quiet; then
+    echo "✗ Pull failed. Check that CI published tag ${IMAGE_TAG} (Actions → ci → docker)"
+    echo "  and, for private packages, run once: docker login ghcr.io -u <github-user>"
+    echo "  with a token that has read:packages. The running version is untouched."
+    exit 1
+  fi
 else
   echo "▶ Skipping pull (--no-pull)"
 fi

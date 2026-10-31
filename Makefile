@@ -141,15 +141,11 @@ PROD_SECRET_FILES := $(addprefix $(PROD_SECRETS)/,root_password master_key postg
 
 prod-secrets: $(PROD_SECRET_FILES) ## Create missing server secrets (existing ones are kept)
 
-prod-up: $(PROD_SECRET_FILES) ## Build on the server and start Qanat (needs deploy/prod/.env)
-	@test -f deploy/prod/.env || (echo "Copy deploy/prod/.env.example to deploy/prod/.env and fill it in" && exit 1)
-	$(PROD) up -d --build --wait
-	@. deploy/prod/.env && echo "" && \
-	  echo "  Dashboard  https://$$QANAT_DOMAIN" && \
-	  echo "  Gateway    https://$$QANAT_DOMAIN/gateway  (ANTHROPIC_BASE_URL)" && \
-	  echo "  Sign in    username root, password in $(PROD_SECRETS)/root_password" && echo ""
+prod-up: ## First start: pull CI images from GHCR, create secrets, start Qanat (needs deploy/prod/.env)
+	deploy/prod/deploy.sh $(TAG)
+	@echo "  Sign in    username root, password in $(PROD_SECRETS)/root_password" && echo ""
 
-prod-deploy: ## Pull CI images and restart (TAG=<sha> to pin or roll back)
+prod-deploy: ## Pull CI images from GHCR and restart (TAG=<sha> to pin or roll back)
 	deploy/prod/deploy.sh $(TAG)
 
 prod-down: ## Stop the server stack (keeps data)
