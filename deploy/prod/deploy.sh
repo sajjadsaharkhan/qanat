@@ -20,6 +20,11 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 ENV_FILE=deploy/prod/.env
 COMPOSE="docker compose -f deploy/prod/compose.yml"
+# A server-only override (gitignored), e.g. to publish the gateway's metrics
+# on a private interface (docs/deploy.md §8).
+if [ -f deploy/prod/compose.override.yml ]; then
+  COMPOSE="$COMPOSE -f deploy/prod/compose.override.yml"
+fi
 
 NO_PULL=false
 DRY_RUN=false

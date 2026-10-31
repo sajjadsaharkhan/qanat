@@ -146,6 +146,18 @@ docker compose -f deploy/prod/compose.yml exec -T postgres \
 `gateway:8080/metrics` from inside the compose network, or through a port you
 publish only to a private interface.
 
+To publish it, create `deploy/prod/compose.override.yml` on the server (it is
+gitignored; `deploy.sh` and `make prod-*` load it when present) and bind the
+port to the private address only:
+
+```yaml
+services:
+  gateway:
+    ports: ["10.0.0.5:9101:8080"] # http://10.0.0.5:9101/metrics
+```
+
+The whole gateway answers on that port, so keep it off public interfaces.
+
 ## 9. CI/CD (GitHub Actions)
 
 `.github/workflows/ci.yml`:

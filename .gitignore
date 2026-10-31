@@ -19,4 +19,5 @@
 /deploy/local/secrets/
 /deploy/prod/secrets/
 /deploy/prod/backups/
+/deploy/prod/compose.override.yml
 /web/tsconfig.tsbuildinfo

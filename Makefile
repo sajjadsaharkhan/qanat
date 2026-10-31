@@ -115,7 +115,7 @@ local-reset: ## Stop the local stack and delete its data
 	$(LOCAL) down -v
 
 # --- Server deploy (deploy/prod, docs/deploy.md) ------------------------------
-PROD := docker compose -f deploy/prod/compose.yml
+PROD := docker compose -f deploy/prod/compose.yml $(if $(wildcard deploy/prod/compose.override.yml),-f deploy/prod/compose.override.yml)
 PROD_SECRETS := deploy/prod/secrets
 
 # The folder is 0700 so other host users can't read it; the files are 0644 so
