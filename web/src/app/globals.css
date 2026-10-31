@@ -47,6 +47,8 @@
   --destructive: #e5484d;
   --destructive-text: #b8282d;
   --success: #4b7a3f;
+  --success-text: #2f5a24;
+  --success-soft: #e4eedc;
 
   /* Switch (design.md §3.2): track on/off and thumb, each ≥ 3:1. */
   --switch-on: #4b7a3f;
@@ -119,6 +121,8 @@
   --destructive: #e5484d;
   --destructive-text: #ff8f92;
   --success: #6f9a5e;
+  --success-text: #a8d496;
+  --success-soft: #1b2a16;
 
   --switch-on: #6f9a5e;
   --switch-off: #6e6a5f;
@@ -185,6 +189,8 @@
   --color-destructive: var(--destructive);
   --color-destructive-text: var(--destructive-text);
   --color-success: var(--success);
+  --color-success-text: var(--success-text);
+  --color-success-soft: var(--success-soft);
   --color-switch-on: var(--switch-on);
   --color-switch-off: var(--switch-off);
   --color-switch-thumb: var(--switch-thumb);
@@ -216,6 +222,18 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
   --shadow-overlay: var(--shadow-overlay);
+
+  /* A passing Test washes the account row green, then lets go. */
+  --animate-verify-flash: verify-flash 3s ease-out forwards;
+  @keyframes verify-flash {
+    0%,
+    25% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
 }
 
 @layer base {

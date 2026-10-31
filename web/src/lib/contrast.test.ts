@@ -46,8 +46,8 @@ function contrast(a: string, b: string): number {
 }
 
 const surfaces = ["background", "card", "muted", "accent", "sidebar", "brand-soft", "sand-soft"];
-const texts = ["foreground", "muted-foreground", "warning-text", "destructive-text", "brand-text", "sand-text"];
-const fills = ["warning", "destructive", "primary"];
+const texts = ["foreground", "muted-foreground", "warning-text", "destructive-text", "success-text", "brand-text", "sand-text"];
+const fills = ["warning", "destructive", "success", "primary"];
 // Switches sit on any surface; the thumb must read on both track states.
 const switchSurfaces = ["background", "card", "muted", "sidebar"];
 
@@ -69,6 +69,10 @@ for (const [theme, t] of [
     it("active nav item text ≥ 4.5:1", () => {
       expect(contrast(token(t, "sidebar-accent-foreground"), token(t, "sidebar-accent"))).toBeGreaterThanOrEqual(4.5);
       expect(contrast(token(t, "sidebar-foreground"), token(t, "sidebar-accent"))).toBeGreaterThanOrEqual(4.5);
+    });
+
+    it("success text on its soft fill ≥ 4.5:1", () => {
+      expect(contrast(token(t, "success-text"), token(t, "success-soft"))).toBeGreaterThanOrEqual(4.5);
     });
 
     it("text on sand (avatar) ≥ 4.5:1", () => {

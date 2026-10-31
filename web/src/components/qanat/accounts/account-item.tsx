@@ -4,12 +4,13 @@
  * and usage/components/ProviderLimits/ProviderLimitCard.js.
  * MIT License, Copyright (c) 2024-2026 decolua and contributors. See LICENSE-9router.
  * Qanat change: the row carries the account's provider limits beside its
- * status; selection feeds the page's bulk bar; less-used actions sit in a menu.
+ * status; health shows as a ring on the logo (green once a Test passed);
+ * selection feeds the page's bulk bar; less-used actions sit in a menu.
  */
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, ChevronUp, Hourglass, KeyRound, Loader2, Lock, MoreHorizontal, Pencil, Play, Trash2, Unplug } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, CircleDashed, Hourglass, KeyRound, Loader2, Lock, MoreHorizontal, Pencil, Play, Trash2, Unplug, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -18,11 +19,11 @@ import { AccountLimitsView, LimitsMeta, RefreshLimitsButton } from "@/components
 import type { Account, AccountLimits } from "@/components/qanat/accounts/limits";
 import { ProxyChoiceOptions } from "@/components/qanat/proxy-options";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { api, errorMessage, type Schemas } from "@/lib/api/client";
+import { formatDuration } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 export type ItemProps = {
@@ -55,8 +56,10 @@ function useAccountActions(account: Account) {
   const del = api.useMutation("delete", "/api/admin/accounts/{id}");
   const path = { params: { path: { id: account.id } } };
   const name = account.label || account.id;
+  const [verifiedAt, setVerifiedAt] = useState(0);
 
   return {
+    verifiedAt,
     name,
     patching: patch.isPending,
     moving: move.isPending,
@@ -77,8 +80,10 @@ function useAccountActions(account: Account) {
       test.mutate(path, {
         onSuccess: (res) => {
           invalidate();
-          if (res.ok) toast(`${name}: credential valid — ${res.status} in ${res.latency_ms}ms.`);
-          else toast.error(`${name}: ${res.error || "the credential was rejected."}`);
+          if (res.ok) {
+            setVerifiedAt(Date.now());
+            toast(`${name}: credential valid — ${res.status} in ${res.latency_ms}ms.`);
+          } else toast.error(`${name}: ${res.error || "the credential was rejected."}`);
         },
         onError: (e) => toast.error(errorMessage(e)),
       }),
@@ -115,56 +120,113 @@ function CooldownTimer({ until }: { until: string }) {
   );
 }
 
-/** Status per design.md §5: shape and words, not color alone. */
-function StatusBadges({ account, limits }: { account: Account; limits: AccountLimits | undefined }) {
+type Health = "ok" | "bad" | "warn" | null;
+
+function isCooling(account: Account) {
+  return account.state === "cooldown" && !!account.cooldown_until && new Date(account.cooldown_until) > new Date();
+}
+
+function isExpired(account: Account) {
+  return !!account.expires_at && new Date(account.expires_at) < new Date();
+}
+
+/** The ring on the logo: red when the account can't serve, amber while it waits, green once a Test passed. */
+function healthOf(account: Account, limits: AccountLimits | undefined): Health {
+  if (account.disabled_at) return null;
+  if (account.state === "disconnected" || isExpired(account) || account.last_check_ok === false) return "bad";
+  if (isCooling(account) || limits?.limit_reached) return "warn";
+  return account.last_check_ok ? "ok" : null;
+}
+
+const healthRing: Record<NonNullable<Health>, string> = {
+  ok: "ring-2 ring-success ring-offset-2 ring-offset-card",
+  bad: "ring-2 ring-destructive ring-offset-2 ring-offset-card",
+  warn: "ring-2 ring-warning ring-offset-2 ring-offset-card",
+};
+const healthDot: Record<NonNullable<Health>, { bg: string; Icon: typeof Check }> = {
+  ok: { bg: "bg-success", Icon: Check },
+  bad: { bg: "bg-destructive", Icon: X },
+  warn: { bg: "bg-warning", Icon: Hourglass },
+};
+
+function Sep() {
+  return <span aria-hidden>·</span>;
+}
+
+/** Status per design.md §5: one line of words, matching the ring's color. */
+function HealthLine({ account, limits, now }: { account: Account; limits: AccountLimits | undefined; now: number }) {
   const disabled = !!account.disabled_at;
-  const cooling = account.state === "cooldown" && account.cooldown_until && new Date(account.cooldown_until) > new Date();
-  const expired = account.expires_at && new Date(account.expires_at) < new Date();
+  const cooling = isCooling(account);
+  const checkedMs = account.last_check_at ? now - new Date(account.last_check_at).getTime() : null;
+  const checkError = account.last_check_ok === false ? account.last_check_error : null;
+
+  const lead = disabled ? (
+    <span className="font-medium text-foreground">Disabled</span>
+  ) : account.state === "disconnected" ? (
+    <span className="inline-flex items-center gap-1 font-medium text-destructive-text">
+      <Unplug aria-hidden className="size-3.5" />
+      Disconnected
+    </span>
+  ) : cooling ? (
+    <span className="inline-flex items-center gap-1 font-medium text-warning-text">
+      <Hourglass aria-hidden className="size-3.5" />
+      Cooling down
+    </span>
+  ) : limits?.limit_reached ? (
+    <span className="font-medium text-warning-text">Limit reached</span>
+  ) : account.last_check_ok === false ? (
+    <span className="font-medium text-destructive-text">Check failed</span>
+  ) : (
+    <span className={cn("font-medium", account.last_check_ok ? "text-success-text" : "text-foreground")}>Healthy</span>
+  );
+
   return (
-    <>
-      {disabled ? (
-        <Badge variant="outline">disabled</Badge>
-      ) : account.state === "disconnected" ? (
-        <Badge variant="destructive">
-          <Unplug aria-hidden />
-          disconnected
-        </Badge>
-      ) : cooling ? (
-        <Badge variant="outline" className="border-warning/40 text-warning-text">
-          <Hourglass aria-hidden />
-          cooldown
-        </Badge>
-      ) : limits?.limit_reached ? (
-        <Badge variant="outline" className="border-destructive/40 text-destructive-text">
-          limit reached
-        </Badge>
-      ) : (
-        <Badge variant="secondary">active</Badge>
-      )}
+    <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground">
+      {lead}
       {cooling && account.cooldown_until && <CooldownTimer until={account.cooldown_until} />}
-      {expired && <Badge variant="destructive">expired</Badge>}
-      {account.last_check_ok === false && account.last_check_error && (
-        <span className="max-w-[260px] truncate text-xs text-destructive-text" title={account.last_check_error}>
-          {account.last_check_error}
-        </span>
+      {disabled ? (
+        <>
+          <Sep />
+          <span>takes no traffic</span>
+        </>
+      ) : account.last_check_ok && checkedMs != null ? (
+        <>
+          <Sep />
+          <span data-volatile>verified {checkedMs < 60_000 ? "just now" : `${formatDuration(checkedMs)} ago`}</span>
+        </>
+      ) : account.last_check_ok == null && account.has_credentials ? (
+        <>
+          <Sep />
+          <span className="inline-flex items-center gap-1">
+            <CircleDashed aria-hidden className="size-3" />
+            never tested
+          </span>
+        </>
+      ) : null}
+      {isExpired(account) && (
+        <>
+          <Sep />
+          <span className="text-destructive-text">credential expired</span>
+        </>
       )}
-      {account.last_refresh_error && (
-        <span className="max-w-[260px] truncate text-xs text-destructive-text" title={account.last_refresh_error}>
-          {account.last_refresh_error}
+      {[checkError, account.last_refresh_error].filter(Boolean).map((err) => (
+        <span key={err} className="max-w-[260px] truncate text-destructive-text" title={err!}>
+          <Sep /> {err}
         </span>
-      )}
-    </>
+      ))}
+    </p>
   );
 }
 
-function Identity({ account, logo, providerName }: { account: Account; logo: string; providerName: string }) {
+function Identity({ account, logo, providerName, health }: { account: Account; logo: string; providerName: string; health: Health }) {
   const kind = account.auth_kind === "api_key" ? "API key" : account.auth_kind === "oauth" ? "OAuth" : "Token";
   const KindIcon = account.auth_kind === "api_key" ? KeyRound : Lock;
   return (
     <div className="flex min-w-0 items-center gap-2.5">
-      <span aria-hidden className="grid size-8 shrink-0 place-items-center rounded-md bg-brand-soft">
+      <span aria-hidden className={cn("relative grid size-8 shrink-0 place-items-center rounded-md bg-brand-soft transition-shadow duration-500", health && healthRing[health], account.disabled_at && "grayscale")}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={logo} alt="" className="max-h-5 max-w-5 rounded object-contain" />
+        {health && <HealthDot health={health} />}
       </span>
       <div className="min-w-0">
         <p className="flex min-w-0 items-center gap-1.5 text-sm font-medium">
@@ -182,6 +244,21 @@ function Identity({ account, logo, providerName }: { account: Account; logo: str
       </div>
     </div>
   );
+}
+
+function HealthDot({ health }: { health: NonNullable<Health> }) {
+  const { bg, Icon } = healthDot[health];
+  return (
+    <span className={cn("absolute -end-1.5 -bottom-1.5 grid size-4 place-items-center rounded-full text-card ring-2 ring-card", bg)}>
+      <Icon className="size-2.5" strokeWidth={3.5} />
+    </span>
+  );
+}
+
+/** A green wash over the item after a passing Test; keyed so each pass replays it. */
+function VerifyFlash({ at }: { at: number }) {
+  if (!at) return null;
+  return <span key={at} aria-hidden className="pointer-events-none absolute inset-0 -z-10 animate-verify-flash rounded-[inherit] border border-success/50 bg-success-soft" />;
 }
 
 function MoreMenu({ account, actions, onEdit, onDelete }: { account: Account; actions: ReturnType<typeof useAccountActions>; onEdit: () => void; onDelete: () => void }) {
@@ -274,28 +351,31 @@ export function AccountRow(p: ItemProps) {
   const [confirm, setConfirm] = useState(false);
   const disabled = !!p.account.disabled_at;
   const busyTest = actions.testing || p.testing;
+  const health = healthOf(p.account, p.limits);
 
   return (
     <div
       data-selected={p.selected || undefined}
+      data-disabled={disabled || undefined}
       className={cn(
-        "grid grid-cols-[auto_1fr_auto] items-center gap-x-3 gap-y-2 rounded-md border border-transparent px-2 py-2 transition-colors hover:bg-accent/40 data-[selected]:border-primary/30 data-[selected]:bg-accent/50",
+        "relative isolate grid grid-cols-[auto_1fr_auto] items-center gap-x-3 gap-y-2 rounded-md border border-transparent px-2 py-2 transition-colors hover:bg-accent/40 data-[disabled]:bg-muted/50 data-[selected]:border-primary/30 data-[selected]:bg-accent/50",
         "lg:grid-cols-[auto_minmax(0,1.1fr)_minmax(0,1fr)_auto]",
       )}
     >
+      <VerifyFlash at={actions.verifiedAt} />
       <div className="flex items-center gap-1.5">
         <Checkbox checked={p.selected} onCheckedChange={(v) => p.onSelect(v === true)} aria-label={`Select ${actions.name}`} />
         {p.reorder && <ReorderArrows reorder={p.reorder} actions={actions} />}
       </div>
 
-      <div className={cn("min-w-0", disabled && "opacity-60")}>
-        <Identity account={p.account} logo={p.logo} providerName={p.providerName} />
-        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 ps-[42px]">
-          <StatusBadges account={p.account} limits={p.limits} />
+      <div className="min-w-0">
+        <Identity account={p.account} logo={p.logo} providerName={p.providerName} health={health} />
+        <div className="mt-1 ps-[42px]">
+          <HealthLine account={p.account} limits={p.limits} now={p.now} />
         </div>
       </div>
 
-      <div className={cn("col-span-3 col-start-1 flex min-w-0 items-center gap-1 ps-7 lg:col-span-1 lg:col-start-auto lg:ps-0", disabled && "opacity-60")}>
+      <div className={cn("col-span-3 col-start-1 flex min-w-0 items-center gap-1 ps-7 lg:col-span-1 lg:col-start-auto lg:ps-0")}>
         <div className="min-w-0 flex-1">
           <AccountLimitsView supported={p.supported} limits={p.limits} pending={p.limitsPending} compact now={p.now} />
         </div>
@@ -321,16 +401,19 @@ export function AccountCard(p: ItemProps) {
   const [confirm, setConfirm] = useState(false);
   const disabled = !!p.account.disabled_at;
   const busyTest = actions.testing || p.testing;
+  const health = healthOf(p.account, p.limits);
 
   return (
     <div
       data-selected={p.selected || undefined}
-      className="flex h-full flex-col gap-3 rounded-[10px] border bg-card p-3.5 transition-colors data-[selected]:border-primary/40 data-[selected]:bg-accent/30"
+      data-disabled={disabled || undefined}
+      className="relative isolate flex h-full flex-col gap-3 rounded-[10px] border bg-card p-3.5 transition-colors data-[disabled]:bg-muted/50 data-[selected]:border-primary/40 data-[selected]:bg-accent/30"
     >
+      <VerifyFlash at={actions.verifiedAt} />
       <div className="flex items-start justify-between gap-2">
-        <div className={cn("flex min-w-0 items-start gap-2", disabled && "opacity-60")}>
+        <div className="flex min-w-0 items-start gap-2">
           <Checkbox className="mt-2" checked={p.selected} onCheckedChange={(v) => p.onSelect(v === true)} aria-label={`Select ${actions.name}`} />
-          <Identity account={p.account} logo={p.logo} providerName={p.providerName} />
+          <Identity account={p.account} logo={p.logo} providerName={p.providerName} health={health} />
         </div>
         <div className="flex shrink-0 items-center gap-0.5">
           {p.reorder && <ReorderArrows reorder={p.reorder} actions={actions} />}
@@ -338,11 +421,9 @@ export function AccountCard(p: ItemProps) {
         </div>
       </div>
 
-      <div className={cn("flex flex-wrap items-center gap-x-2 gap-y-1", disabled && "opacity-60")}>
-        <StatusBadges account={p.account} limits={p.limits} />
-      </div>
+      <HealthLine account={p.account} limits={p.limits} now={p.now} />
 
-      <div className={cn("flex flex-1 flex-col gap-2 border-t pt-3", disabled && "opacity-60")}>
+      <div className="flex flex-1 flex-col gap-2 border-t pt-3">
         <AccountLimitsView supported={p.supported} limits={p.limits} pending={p.limitsPending} now={p.now} />
         {p.supported && <LimitsMeta limits={p.limits} now={p.now} />}
       </div>
