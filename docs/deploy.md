@@ -112,7 +112,7 @@ The dashboard's Setup page shows these values for each user.
 
 ## 6. Update
 
-With CI/CD (§9), every push to `main` deploys itself. By hand:
+CI (§9) builds the images; deploying is manual. On the server:
 
 ```sh
 git pull && make prod-deploy            # pull the CI images for `latest`
@@ -159,38 +159,9 @@ publish only to a private interface.
 3. **docker:** on pushes only. Builds the changed images and pushes them to
    `ghcr.io/<owner>/<repo>/qanat` and `/web`, tagged with the short SHA and the
    branch name, plus `latest` on `main`.
-4. **deploy:** on pushes to `main` only, after the images are pushed, or when
-   only `deploy/prod/` changed. It runs on a **self-hosted runner on the
-   server**: it resets the server checkout to `origin/main`, then runs
-   `deploy/prod/deploy.sh`, which pulls `latest`, recreates only the changed
-   containers and checks the routes through nginx.
+Pull requests run the tests only. Nothing is pushed.
 
-Pull requests run the tests only. Nothing is pushed or deployed.
-
-### One-time setup
-
-On GitHub:
-
-- **Environment** `production` (Settings → Environments). Add required
-  reviewers there if deploys should wait for approval.
-- **Repository variable** `DEPLOY_PATH`: the absolute path of the checkout on
-  the server, e.g. `/home/deploy/qanat`.
-
-On the server:
-
-1. Clone the repo to `DEPLOY_PATH`, then fill in `deploy/prod/.env` (§2) and
-   the Keycloak client (§3). Untracked files survive the deploy job's
-   `git reset --hard`, so `.env`, `secrets/` and `backups/` are safe.
-2. Install a GitHub Actions runner (Settings → Actions → Runners → New
-   self-hosted runner) as a service, under a user that owns `DEPLOY_PATH` and
-   is in the `docker` group. The default `self-hosted` label is enough.
-3. If the packages are private, log Docker in once as the runner user, using
-   a token with only `read:packages`:
-   `docker login ghcr.io -u <github-user>`.
-4. Run the first deploy by hand (`make prod-deploy`), or start the workflow
-   manually.
-
-**Keep the repository private, or restrict the runner.** On a public repo, a
-pull request from a fork could run its own code on a self-hosted runner. If
-the repo is public, put the runner in a runner group limited to this
-workflow on `main`, and require approval for fork pull requests.
+CI does not deploy. On the server, run `git pull && make prod-deploy` (§6) to
+pull `latest`. If the packages are private, log Docker in once on the server
+with a token that has only `read:packages`:
+`docker login ghcr.io -u <github-user>`.

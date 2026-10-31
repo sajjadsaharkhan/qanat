@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 # Superseded PR runs are cancelled. Pushes to main are left alone so an
-# in-flight image publish or deploy is never aborted.
+# in-flight image publish is never aborted.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -26,7 +26,6 @@ jobs:
     outputs:
       backend: ${{ steps.out.outputs.backend }}
       web: ${{ steps.out.outputs.web }}
-      deploy: ${{ steps.out.outputs.deploy }}
       images: ${{ steps.out.outputs.images }}
       any-image: ${{ steps.out.outputs.any-image }}
     steps:
@@ -50,9 +49,7 @@ jobs:
             web:
               - 'web/**'
               - '.github/workflows/ci.yml'
-            deploy:
-              - 'deploy/prod/**'
-      # A manual run builds, tests and deploys everything. Otherwise the image
+      # A manual run builds and tests everything. Otherwise the image
       # matrix holds only the images whose source changed.
       - name: outputs
         id: out
@@ -60,16 +57,14 @@ jobs:
           ALL: ${{ github.event_name == 'workflow_dispatch' }}
           BACKEND: ${{ steps.filter.outputs.backend }}
           WEB: ${{ steps.filter.outputs.web }}
-          DEPLOY: ${{ steps.filter.outputs.deploy }}
         run: |
-          [ "$ALL" = true ] && BACKEND=true WEB=true DEPLOY=true
+          [ "$ALL" = true ] && BACKEND=true WEB=true
           matrix='[]'
           [ "$BACKEND" = true ] && matrix=$(jq -c '. + [{"name":"qanat","context":".","target":"qanat"}]' <<<"$matrix")
           [ "$WEB" = true ] && matrix=$(jq -c '. + [{"name":"web","context":"web","target":"web"}]' <<<"$matrix")
           {
             echo "backend=$BACKEND"
             echo "web=$WEB"
-            echo "deploy=$DEPLOY"
             echo "images=$matrix"
             echo "any-image=$([ "$(jq length <<<"$matrix")" -gt 0 ] && echo true || echo false)"
           } >> "$GITHUB_OUTPUT"
@@ -210,37 +205,3 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.image.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}
-
-  # ── Deploy: deploy/prod/deploy.sh on the server's self-hosted runner ───────
-  # Pushes to main only, when images were published or deploy/prod changed.
-  # It always deploys `latest`: the sha tag exists only for images that were
-  # rebuilt. `!failure() && !cancelled()` stands in for success(), which is
-  # false whenever an upstream job was skipped.
-  deploy:
-    name: deploy (production)
-    needs: [changes, docker]
-    if: >-
-      !failure() && !cancelled()
-      && github.event_name != 'pull_request'
-      && github.ref == 'refs/heads/main'
-      && (needs.changes.outputs.any-image == 'true' || needs.changes.outputs.deploy == 'true')
-    runs-on: self-hosted
-    timeout-minutes: 45 # the gateway drains streams for up to 10 minutes
-    environment: production
-    # Never two deploys at once, and never cancel one mid-flight.
-    concurrency:
-      group: deploy-production
-      cancel-in-progress: false
-    steps:
-      # deploy.sh needs the server's .env and secrets (not in git), so it runs
-      # in the existing server checkout, not the runner's throwaway workspace.
-      # Set the repository variable DEPLOY_PATH to that directory.
-      - name: update server checkout
-        working-directory: ${{ vars.DEPLOY_PATH }}
-        run: |
-          git fetch origin main
-          git checkout main
-          git reset --hard origin/main
-      - name: deploy
-        working-directory: ${{ vars.DEPLOY_PATH }}
-        run: deploy/prod/deploy.sh
