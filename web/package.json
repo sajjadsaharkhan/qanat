@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build && cp -r .next/static .next/standalone/.next/static",
     "start": "node .next/standalone/server.js",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "next typegen && tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",

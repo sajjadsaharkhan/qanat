@@ -72,7 +72,9 @@ func TestAccess_ModelsListIsFilteredByPlan(t *testing.T) {
 		ids = append(ids, m.ID)
 	}
 	sort.Strings(ids)
-	if len(ids) != 2 || ids[0] != "claude-sonnet-4-6" || ids[1] != "sonnet" {
+	// Bare names come from the admin's mapping; the provider's own catalog is
+	// listed prefixed (REQ-MAP-04), so claude-sonnet-4-6 shows as cc/….
+	if len(ids) != 2 || ids[0] != "cc/claude-sonnet-4-6" || ids[1] != "sonnet" {
 		t.Fatalf("REQ-ACCESS-02: got %v", ids)
 	}
 }

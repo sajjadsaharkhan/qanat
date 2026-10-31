@@ -28,7 +28,9 @@ var utc = Anchors{Location: time.UTC, Weekday: time.Saturday, MonthDay: 1}
 func TestStore_AdmitThenSettle(t *testing.T) {
 	s, u := testStore(t)
 	ctx := context.Background()
-	now := time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
+	// Today, not a fixed date: fixed windows expire at their real reset time
+	// (EXPIREAT), so a past date's counters vanish as soon as they're written.
+	now := time.Now().UTC().Truncate(24 * time.Hour).Add(12 * time.Hour)
 	p := Policy{Anchors: utc, Windows: []Window{{Kind: Daily, LimitMicro: ToMicro(1)}, {Kind: Rolling5h, LimitMicro: ToMicro(5)}}}
 
 	d, err := s.Admit(ctx, u, "r1", p, now)

@@ -37,7 +37,8 @@ func TestAdminNetwork(t *testing.T) {
 		t.Fatalf("accounts still listed from the database: %+v", empty.Providers[0].Accounts)
 	}
 
-	now := time.Now()
+	// Mid-bucket, so the reports at now-1s and now share one history bucket.
+	now := time.Now().Truncate(netstats.Interval).Add(-netstats.Interval / 2)
 	ttft := int64(400)
 	report := func(instance string, at time.Time, active int, evs []netstats.Event) {
 		rep := netstats.Report{Instance: instance, At: at, StartedAt: at.Add(-time.Hour),
