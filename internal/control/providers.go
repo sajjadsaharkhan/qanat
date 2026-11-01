@@ -1,8 +1,10 @@
 package control
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -39,12 +41,17 @@ func (s *Server) syncProviderModels(w http.ResponseWriter, r *http.Request, _ *d
 		fail(w, http.StatusBadRequest, "invalid_provider", `Provider must be "claude", "codex" or "antigravity".`)
 		return
 	}
-	models, errMsg, code := s.fetchProviderCatalog(r, providerID)
+	models, errMsg, code, err := s.fetchProviderCatalog(r, providerID)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
 	if errMsg != "" {
+		s.log.WarnContext(r.Context(), "provider catalog sync failed", "provider", providerID, "status", code, "err", errMsg)
 		fail(w, code, "provider_catalog_failed", errMsg)
 		return
 	}
-	err := pgx.BeginFunc(r.Context(), s.pg, func(tx pgx.Tx) error {
+	err = pgx.BeginFunc(r.Context(), s.pg, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
 		if err := q.ReplaceProviderModels(r.Context(), providerID); err != nil {
 			return err
@@ -66,12 +73,13 @@ func (s *Server) syncProviderModels(w http.ResponseWriter, r *http.Request, _ *d
 
 // fetchProviderCatalog asks the provider, through the first usable account's
 // own credential and proxy. A non-empty returned message is a user-facing
-// failure with its status.
-func (s *Server) fetchProviderCatalog(r *http.Request, providerID string) (models []string, errMsg string, status int) {
+// failure with its status; a returned error is a server fault. Either way
+// the stored catalog must be left alone.
+func (s *Server) fetchProviderCatalog(r *http.Request, providerID string) (models []string, errMsg string, status int, err error) {
 	// First usable account with a credential, in pool order.
 	rows, err := s.q.ListAccounts(r.Context())
 	if err != nil {
-		return nil, "", http.StatusInternalServerError
+		return nil, "", http.StatusInternalServerError, err
 	}
 	var pick db.ListAccountsRow
 	found := false
@@ -83,22 +91,22 @@ func (s *Server) fetchProviderCatalog(r *http.Request, providerID string) (model
 		}
 	}
 	if !found {
-		return nil, "No enabled account for this provider. Add and enable one, then sync its catalog.", http.StatusConflict
+		return nil, "No enabled account for this provider. Add and enable one, then sync its catalog.", http.StatusConflict, nil
 	}
 	admin, err := s.q.GetAccountAdmin(r.Context(), pick.ID)
 	if err != nil {
-		return nil, "", http.StatusInternalServerError
+		return nil, "", http.StatusInternalServerError, err
 	}
 	if s.opts.Box == nil {
-		return nil, "QANAT_MASTER_KEY isn't set on the server, so stored credentials can't be read.", http.StatusConflict
+		return nil, "QANAT_MASTER_KEY isn't set on the server, so stored credentials can't be read.", http.StatusConflict, nil
 	}
 	plain, err := s.opts.Box.Open(admin.Credentials, []byte(admin.ID))
 	if err != nil {
-		return nil, "The stored credential can't be read with the current master key. Save the credential again.", http.StatusConflict
+		return nil, "The stored credential can't be read with the current master key. Save the credential again.", http.StatusConflict, nil
 	}
 	var creds oauth.Credentials
 	if err := json.Unmarshal(plain, &creds); err != nil || creds.AccessToken == "" {
-		return nil, "The stored credential can't be read with the current master key. Save the credential again.", http.StatusConflict
+		return nil, "The stored credential can't be read with the current master key. Save the credential again.", http.StatusConflict, nil
 	}
 
 	base := deref(admin.BaseUrl)
@@ -109,7 +117,7 @@ func (s *Server) fetchProviderCatalog(r *http.Request, providerID string) (model
 	defer cancel()
 	req, err := modelsProbe(ctx, providerID, admin.AuthKind, creds.AccessToken, creds.Upstream(), base)
 	if err != nil {
-		return nil, "", http.StatusInternalServerError
+		return nil, "", http.StatusInternalServerError, err
 	}
 	client := &http.Client{}
 	if spec := s.accountProxySpec(r.Context(), admin); spec != nil {
@@ -117,19 +125,37 @@ func (s *Server) fetchProviderCatalog(r *http.Request, providerID string) (model
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, cleanUpstreamError(err), http.StatusBadGateway
+		return nil, cleanUpstreamError(err), http.StatusBadGateway, nil
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 512<<10))
+	// One byte past the cap tells a too-large list from one that just fits.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxCatalogBody+1))
+	if err != nil {
+		return nil, "The provider's model list was cut off: " + cleanUpstreamError(err), http.StatusBadGateway, nil
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, upstreamErrorMessage(resp.StatusCode, body), http.StatusBadGateway
+		return nil, upstreamErrorMessage(resp.StatusCode, body), http.StatusBadGateway, nil
+	}
+	if len(body) > maxCatalogBody {
+		return nil, fmt.Sprintf("The provider's model list is larger than %d MB.", maxCatalogBody>>20), http.StatusBadGateway, nil
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		return nil, fmt.Sprintf("The provider answered %d with an empty model list.", resp.StatusCode), http.StatusBadGateway, nil
 	}
 	models, err = parseModelCatalog(providerID, admin.AuthKind, body)
 	if err != nil {
-		return nil, "The provider's model list couldn't be read: " + err.Error(), http.StatusBadGateway
+		return nil, "The provider's model list couldn't be read: " + err.Error(), http.StatusBadGateway, nil
 	}
-	return models, "", http.StatusOK
+	if len(models) == 0 {
+		return nil, "The provider listed no models, so the stored catalog was kept.", http.StatusBadGateway, nil
+	}
+	return models, "", http.StatusOK, nil
 }
+
+// maxCatalogBody caps a provider's models-list response. Codex's carries
+// each model's full instructions: 656 KB on 2026-11-02, past the old 512 KB
+// cap, which cut the JSON off mid-document.
+const maxCatalogBody = 16 << 20
 
 // modelsProbe builds the provider's own models-list request for a credential.
 // upstream is the Cloud Code project of an Antigravity OAuth account or the

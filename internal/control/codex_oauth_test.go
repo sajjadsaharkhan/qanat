@@ -5,6 +5,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"qanat/internal/core/oauth"
@@ -70,5 +72,75 @@ func TestOAuthSignInCodex(t *testing.T) {
 	creds := h.sealedCreds(ex.ID)
 	if creds.AccessToken != "cx-at" || creds.RefreshToken != "cx-rt" || creds.AccountID != "acc-42" {
 		t.Fatalf("sealed credentials: %+v", creds)
+	}
+}
+
+// The Codex models list carries each model's instructions and outgrew the
+// old 512 KB read cap, which cut the JSON off ("unexpected end of JSON
+// input"). A list past that size syncs whole; an empty answer fails without
+// wiping the stored catalog.
+func TestSyncCodexCatalog(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test")
+	}
+	h := newOAuthHarness(t)
+	fakeCodex(t)
+	c := h.signInRoot()
+	var auth struct {
+		State       string `json:"state"`
+		RedirectURI string `json:"redirect_uri"`
+	}
+	h.do(c, "GET", "/api/admin/accounts/oauth/codex/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A3001%2Fcallback", "", &auth)
+	if st := h.do(c, "POST", "/api/admin/accounts/oauth/codex/exchange",
+		`{"code":"ac_1","state":"`+auth.State+`","redirect_uri":"`+auth.RedirectURI+`"}`, nil); st != 201 {
+		t.Fatalf("exchange: %d", st)
+	}
+
+	pad := strings.Repeat("x", 600<<10)
+	var body atomic.Pointer[string]
+	full := `{"models":[{"slug":"gpt-6.1-sol","base_instructions":"` + pad + `"},{"slug":"gpt-6-luna"}]}`
+	body.Store(&full)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models" || r.Header.Get("Authorization") != "Bearer cx-at" {
+			http.Error(w, "unexpected request", 400)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, *body.Load())
+	}))
+	t.Cleanup(upstream.Close)
+	orig := oauth.CodexAPIURL
+	oauth.CodexAPIURL = upstream.URL
+	t.Cleanup(func() { oauth.CodexAPIURL = orig })
+
+	var synced struct {
+		Models []string `json:"models"`
+	}
+	if st := h.do(c, "POST", "/api/admin/providers/codex/models", "", &synced); st != 200 {
+		t.Fatalf("sync: %d", st)
+	}
+	if strings.Join(synced.Models, ",") != "gpt-6.1-sol,gpt-6-luna" {
+		t.Fatalf("synced models: %v", synced.Models)
+	}
+
+	empty := ""
+	body.Store(&empty)
+	var failed struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if st := h.do(c, "POST", "/api/admin/providers/codex/models", "", &failed); st != 502 {
+		t.Fatalf("empty sync: %d", st)
+	}
+	if !strings.Contains(failed.Error.Message, "empty model list") {
+		t.Fatalf("empty sync message: %q", failed.Error.Message)
+	}
+	var stored struct {
+		Models []string `json:"models"`
+	}
+	h.do(c, "GET", "/api/admin/providers/codex/models", "", &stored)
+	if len(stored.Models) != 2 {
+		t.Fatalf("stored catalog after failed sync: %v", stored.Models)
 	}
 }
