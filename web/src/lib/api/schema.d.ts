@@ -243,8 +243,25 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Live network analytics per provider, merged from every gateway's report (nothing stored; last 30 minutes) */
+        /** Live network analytics per provider, merged from every gateway's report (last 30 minutes; model status keeps 24 hours in Redis) */
         get: operations["adminNetwork"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/network/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Model Status. Every model used in the last 24 hours, one availability bar per 30 minutes (any signed-in user) */
+        get: operations["networkModels"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1291,6 +1308,47 @@ export interface components {
             internet_history: components["schemas"]["NetworkPoint"][];
             providers: components["schemas"]["ProviderNetwork"][];
         };
+        /** @description Counted attempts are successes and upstream faults (connect, mid-stream, 5xx); rate limits, client aborts and pool rejections are left out */
+        ModelStatusOverview: {
+            /** Format: date-time */
+            generated_at: string;
+            /** @description Bar width (30 minutes) */
+            bucket_seconds: number;
+            /** @description Share of counted attempts that did not fault */
+            success_rate: number | null;
+            /** @description Most-used first */
+            models: components["schemas"]["ModelStatus"][];
+        };
+        ModelStatus: {
+            provider: string;
+            /** @description The provider's model-name prefix (cc */
+            prefix: string;
+            /** @description The upstream model id */
+            model: string;
+            /** Format: int64 */
+            attempts: number;
+            availability: number | null;
+            /**
+             * Format: int64
+             * @description From a histogram
+             */
+            ttft_p90_ms: number | null;
+            /**
+             * Format: int64
+             * @description Mean duration of successful attempts
+             */
+            avg_latency_ms: number | null;
+            /** @description Oldest first */
+            buckets: components["schemas"]["ModelStatusBucket"][];
+        };
+        ModelStatusBucket: {
+            /** Format: date-time */
+            t: string;
+            /** Format: int64 */
+            attempts: number;
+            /** Format: int64 */
+            faults: number;
+        };
         NetworkGateway: {
             instance: string;
             /** Format: date-time */
@@ -2047,6 +2105,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NetworkOverview"];
+                };
+            };
+        };
+    };
+    networkModels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelStatusOverview"];
                 };
             };
         };

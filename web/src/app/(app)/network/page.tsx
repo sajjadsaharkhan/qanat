@@ -12,6 +12,7 @@ import { useIsFetching, useQueryClient } from "@tanstack/react-query";
 import { memo, useDeferredValue, useId, useState } from "react";
 
 import { Panel, PathChart, TrafficChart, TTFTChart } from "@/components/qanat/network/charts";
+import { ModelStatus } from "@/components/qanat/network/model-status";
 import { Ago } from "@/components/qanat/network/clock";
 import { Reveal, Rolling, usePress } from "@/components/qanat/network/motion";
 import { AccountsTable, ErrorsPanel, LiveTraffic, ProviderNetworkCard, RoutesTable } from "@/components/qanat/network/provider-network";
@@ -131,7 +132,7 @@ function Controls({ live, onLive }: { live: boolean; onLive: (v: boolean) => voi
   );
 }
 
-export default function AdminNetworkPage() {
+export default function NetworkPage() {
   const [live, setLive] = useState(true);
   // Only data and errors re-render the page: fetch start/end don't (Controls
   // watches those), so each poll costs one render, at low priority.
@@ -140,7 +141,7 @@ export default function AdminNetworkPage() {
   const [picked, setPicked] = useState<string | null>(null);
 
   const description =
-    "Is it our network, the path, or the provider? Handshake probes every 10 s, plus what real requests see. Live, last 30 minutes; nothing is stored.";
+    "Is it our network, the path, or the provider? Handshake probes every 10 s, plus what real requests see. Live, last 30 minutes; Model status below covers 24 hours.";
   const controls = <Controls live={live} onLive={setLive} />;
 
   if (!deferred && !q.error) {
@@ -206,6 +207,10 @@ export default function AdminNetworkPage() {
           </div>
         </Reveal>
       )}
+
+      <div className="mt-8">
+        <ModelStatus />
+      </div>
     </ReducedMotionConfig>
   );
 }

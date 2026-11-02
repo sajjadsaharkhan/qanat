@@ -53,6 +53,8 @@ const userNav: NavItem[] = [
   { href: "/", label: "Overview", icon: LayoutGrid },
   { href: "/requests", label: "Requests", icon: Activity },
   { href: "/keys", label: "Keys", icon: KeyRound },
+  { href: "/models", label: "Models", icon: Shapes },
+  { href: "/network", label: "Network", icon: Radar },
   { href: "/setup", label: "Setup", icon: SquareTerminal },
 ];
 
@@ -71,14 +73,12 @@ const adminNav: { label: string; items: NavItem[] }[] = [
     label: "Providers",
     items: [
       { href: "/admin/accounts", label: "Accounts", icon: Server },
-      { href: "/admin/models", label: "Models", icon: Shapes },
       { href: "/admin/proxies", label: "Proxies", icon: Network },
     ],
   },
   {
     label: "Operations",
     items: [
-      { href: "/admin/network", label: "Network", icon: Radar },
       { href: "/admin/audit", label: "Audit log", icon: ScrollText },
     ],
   },

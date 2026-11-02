@@ -45,6 +45,14 @@ type netTracker struct {
 	lastTick time.Time
 	inflight map[string]bool // probes running, by route key
 	nextInet time.Time
+	// models counts attempts per model and 30-minute bucket until the next
+	// report flushes them to Redis (Model Status, netstats/models.go).
+	models map[modelSlot]*netstats.ModelAgg
+}
+
+type modelSlot struct {
+	netstats.ModelKeyID
+	bucket time.Time
 }
 
 type provNet struct {
@@ -66,7 +74,7 @@ func newNetTracker() *netTracker {
 	if host == "" {
 		host = "gateway"
 	}
-	return &netTracker{instance: host, started: time.Now(), prov: map[string]*provNet{}, inflight: map[string]bool{}}
+	return &netTracker{instance: host, started: time.Now(), prov: map[string]*provNet{}, inflight: map[string]bool{}, models: map[modelSlot]*netstats.ModelAgg{}}
 }
 
 // p returns the provider's state; the caller holds mu.
@@ -109,12 +117,30 @@ func (t *netTracker) record(providerID string, e netstats.Event) {
 		e.At = time.Now()
 	}
 	t.mu.Lock()
+	if e.Model != "" {
+		slot := modelSlot{netstats.ModelKeyID{Provider: providerID, Model: e.Model}, netstats.ModelBucketStart(e.At)}
+		agg := t.models[slot]
+		if agg == nil {
+			agg = &netstats.ModelAgg{}
+			t.models[slot] = agg
+		}
+		agg.Add(e)
+	}
 	p := t.p(providerID)
 	p.events = append(p.events, e)
 	if over := len(p.events) - netstats.MaxEvents; over > 0 {
 		p.events = slices.Delete(p.events, 0, over)
 	}
 	t.mu.Unlock()
+}
+
+// drainModels hands over the counters since the last call.
+func (t *netTracker) drainModels() map[modelSlot]*netstats.ModelAgg {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := t.models
+	t.models = map[modelSlot]*netstats.ModelAgg{}
+	return out
 }
 
 // netPath is one (provider, proxy, origin) path to probe.
@@ -484,6 +510,13 @@ func (g *Gateway) RunNetStats(ctx context.Context, rdb *redis.Client) {
 			pipe := rdb.TxPipeline()
 			pipe.Set(wctx, netstats.Key(t.instance), b, netstats.ReportTTL)
 			pipe.ZAdd(wctx, netstats.Gateways, redis.Z{Score: float64(now.Unix()), Member: t.instance})
+			for slot, agg := range t.drainModels() {
+				key := netstats.ModelKey(slot.bucket)
+				for field, n := range agg.Fields(slot.ModelKeyID) {
+					pipe.HIncrBy(wctx, key, field, n)
+				}
+				pipe.Expire(wctx, key, netstats.ModelTTL)
+			}
 			if _, err := pipe.Exec(wctx); err != nil {
 				redisErrors.Inc()
 			}

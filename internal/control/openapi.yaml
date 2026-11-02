@@ -144,11 +144,19 @@ paths:
   /api/admin/network:
     get:
       operationId: adminNetwork
-      summary: Live network analytics per provider, merged from every gateway's report (nothing stored; last 30 minutes)
+      summary: Live network analytics per provider, merged from every gateway's report (last 30 minutes; model status keeps 24 hours in Redis)
       responses:
         "200":
           description: OK
           content: { application/json: { schema: { $ref: "#/components/schemas/NetworkOverview" } } }
+  /api/network/models:
+    get:
+      operationId: networkModels
+      summary: Model Status. Every model used in the last 24 hours, one availability bar per 30 minutes (any signed-in user)
+      responses:
+        "200":
+          description: OK
+          content: { application/json: { schema: { $ref: "#/components/schemas/ModelStatusOverview" } } }
   /api/admin/usage:
     get:
       operationId: adminUsage
@@ -1029,6 +1037,34 @@ components:
         internet: { oneOf: [{ $ref: "#/components/schemas/NetworkProbe" }, { type: "null" }], description: "Gateways' own link: TCP connect to public IP literals (worst gateway)" }
         internet_history: { type: array, items: { $ref: "#/components/schemas/NetworkPoint" } }
         providers: { type: array, items: { $ref: "#/components/schemas/ProviderNetwork" } }
+    ModelStatusOverview:
+      type: object
+      required: [generated_at, bucket_seconds, success_rate, models]
+      description: Counted attempts are successes and upstream faults (connect, mid-stream, 5xx); rate limits, client aborts and pool rejections are left out
+      properties:
+        generated_at: { type: string, format: date-time }
+        bucket_seconds: { type: integer, description: Bar width (30 minutes) }
+        success_rate: { type: [number, "null"], description: Share of counted attempts that did not fault, over 24 hours; null with no traffic }
+        models: { type: array, items: { $ref: "#/components/schemas/ModelStatus" }, description: Most-used first }
+    ModelStatus:
+      type: object
+      required: [provider, prefix, model, attempts, availability, ttft_p90_ms, avg_latency_ms, buckets]
+      properties:
+        provider: { type: string }
+        prefix: { type: string, description: The provider's model-name prefix (cc, cx, ag) }
+        model: { type: string, description: The upstream model id }
+        attempts: { type: integer, format: int64 }
+        availability: { type: [number, "null"] }
+        ttft_p90_ms: { type: [integer, "null"], format: int64, description: From a histogram, so approximate }
+        avg_latency_ms: { type: [integer, "null"], format: int64, description: Mean duration of successful attempts }
+        buckets: { type: array, items: { $ref: "#/components/schemas/ModelStatusBucket" }, description: Oldest first, 48 entries; an empty bucket has attempts 0 }
+    ModelStatusBucket:
+      type: object
+      required: [t, attempts, faults]
+      properties:
+        t: { type: string, format: date-time }
+        attempts: { type: integer, format: int64 }
+        faults: { type: integer, format: int64 }
     NetworkGateway:
       type: object
       required: [instance, reported_at, started_at]

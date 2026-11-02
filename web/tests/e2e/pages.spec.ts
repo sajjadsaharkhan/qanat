@@ -9,6 +9,8 @@ const userPages = [
   { path: "/", heading: "Overview" },
   { path: "/requests", heading: "Recent requests" },
   { path: "/keys", heading: "Keys" },
+  { path: "/models", heading: "Models" },
+  { path: "/network", heading: "Network" },
   { path: "/setup", heading: "Setup" },
 ];
 
@@ -17,7 +19,6 @@ const adminPages = [
   { path: "/admin/plans", heading: "Plans" },
   { path: "/admin/accounts", heading: "Accounts" },
   { path: "/admin/proxies", heading: "Proxies" },
-  { path: "/admin/models", heading: "Models" },
   { path: "/admin/audit", heading: "Audit log" },
 ];
 

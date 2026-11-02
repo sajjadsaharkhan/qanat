@@ -41,10 +41,14 @@ function sourceOf(p: Price): Source {
 
 export default function ModelsPage() {
   const qc = useQueryClient();
-  const mappings = api.useQuery("get", "/api/admin/mappings");
+  // Everyone reads the catalogs and prices; mappings, account counts and every
+  // edit are admin-only (the API refuses them for anyone else).
+  const me = api.useQuery("get", "/api/me");
+  const isAdmin = me.data?.role === "admin";
+  const mappings = api.useQuery("get", "/api/admin/mappings", {}, { enabled: isAdmin });
   const prices = api.useQuery("get", "/api/admin/prices");
   const providers = api.useQuery("get", "/api/admin/providers");
-  const accounts = api.useQuery("get", "/api/admin/accounts");
+  const accounts = api.useQuery("get", "/api/admin/accounts", {}, { enabled: isAdmin });
   const pricedModels = [...new Set((prices.data ?? []).filter((p) => p.confirmed_at).map((p) => p.model_id))];
   const setPrice = api.useMutation("post", "/api/admin/prices");
   const deletePrice = api.useMutation("delete", "/api/admin/prices/{model}");
@@ -134,7 +138,11 @@ export default function ModelsPage() {
       <PageHeader
         title="Models & Pricing"
         icon={Boxes}
-        description="Provider prefixes (cc/, cx/, ag/), global model mapping and versioned token prices. Known models have built-in prices; others are rejected until priced."
+        description={
+          isAdmin
+            ? "Provider prefixes (cc/, cx/, ag/), global model mapping and versioned token prices. Known models have built-in prices; others are rejected until priced."
+            : "The models you can call, the provider prefix that routes to each (cc/, cx/, ag/), and their token prices."
+        }
       />
 
       <SectionHeader>Providers</SectionHeader>
@@ -147,20 +155,22 @@ export default function ModelsPage() {
               key={p.id}
               provider={p}
               models={pricedModels}
-              accounts={(accounts.data ?? []).filter((a) => a.provider === p.id).length}
+              accounts={isAdmin ? (accounts.data ?? []).filter((a) => a.provider === p.id).length : undefined}
             />
           ))}
         </div>
       )}
 
-      <MappingEditor rules={mappings.data} providers={providers.data ?? []} loading={mappings.isPending} />
+      {isAdmin && <MappingEditor rules={mappings.data} providers={providers.data ?? []} loading={mappings.isPending} />}
 
       <SectionHeader
         actions={
-          <Button size="sm" onClick={() => openForm("new")}>
-            <Plus className="me-1.5 size-4" />
-            Set price
-          </Button>
+          isAdmin && (
+            <Button size="sm" onClick={() => openForm("new")}>
+              <Plus className="me-1.5 size-4" />
+              Set price
+            </Button>
+          )
         }
       >
         Model price table
@@ -228,10 +238,12 @@ export default function ModelsPage() {
         <EmptyState
           title="No models priced"
           action={
-            <Button onClick={() => openForm("new")} size="sm">
-              <Plus className="me-1.5 size-4" />
-              Set price
-            </Button>
+            isAdmin && (
+              <Button onClick={() => openForm("new")} size="sm">
+                <Plus className="me-1.5 size-4" />
+                Set price
+              </Button>
+            )
           }
         >
           Models must have a confirmed price before they can be used under any Plan quota.
@@ -282,7 +294,7 @@ export default function ModelsPage() {
                   <TableHead className="text-end">Cache write ($/1M)</TableHead>
                   <TableHead>Effective from</TableHead>
                   <TableHead>Source</TableHead>
-                  <TableHead className="w-24" />
+                  {isAdmin && <TableHead className="w-24" />}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -316,36 +328,38 @@ export default function ModelsPage() {
                         <Tag tone="brand">{p.has_default ? "Override" : "Custom"}</Tag>
                       )}
                     </TableCell>
-                    <TableCell className="text-end whitespace-nowrap">
-                      <Button variant="ghost" size="icon" aria-label={`Edit ${p.model_id}`} onClick={() => openForm(p)}>
-                        <Pencil className="size-4 text-muted-foreground" />
-                      </Button>
-                      {p.source === "admin" && (
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button variant="ghost" size="icon" aria-label={`Delete ${p.model_id}`}>
-                              <Trash2 className="size-4 text-muted-foreground hover:text-destructive-text" />
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>
-                                {p.has_default ? `Reset ${p.model_id} to its built-in price?` : `Delete the ${p.model_id} price?`}
-                              </AlertDialogTitle>
-                              <AlertDialogDescription>
-                                {p.has_default
-                                  ? "Your price versions are removed and the built-in price applies again. Past usage keeps the cost it was recorded with."
-                                  : "This model has no built-in price, so requests for it are refused until it is priced again. Past usage keeps the cost it was recorded with."}
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction onClick={() => handleDelete(p)}>{p.has_default ? "Reset" : "Delete"}</AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      )}
-                    </TableCell>
+                    {isAdmin && (
+                      <TableCell className="text-end whitespace-nowrap">
+                        <Button variant="ghost" size="icon" aria-label={`Edit ${p.model_id}`} onClick={() => openForm(p)}>
+                          <Pencil className="size-4 text-muted-foreground" />
+                        </Button>
+                        {p.source === "admin" && (
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button variant="ghost" size="icon" aria-label={`Delete ${p.model_id}`}>
+                                <Trash2 className="size-4 text-muted-foreground hover:text-destructive-text" />
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>
+                                  {p.has_default ? `Reset ${p.model_id} to its built-in price?` : `Delete the ${p.model_id} price?`}
+                                </AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  {p.has_default
+                                    ? "Your price versions are removed and the built-in price applies again. Past usage keeps the cost it was recorded with."
+                                    : "This model has no built-in price, so requests for it are refused until it is priced again. Past usage keeps the cost it was recorded with."}
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => handleDelete(p)}>{p.has_default ? "Reset" : "Delete"}</AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        )}
+                      </TableCell>
+                    )}
                   </TableRow>
                 ))}
               </TableBody>
