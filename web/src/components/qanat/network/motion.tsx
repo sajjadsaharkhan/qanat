@@ -40,7 +40,7 @@ export function Rolling({ value, decimals = 0, className }: { value: number; dec
   const { spring } = useMotionTokens();
   const rounded = Number(value.toFixed(decimals));
   return (
-    <span className={cn("inline-flex tabular-nums", className)} aria-label={rounded.toFixed(decimals)}>
+    <span role="img" className={cn("inline-flex tabular-nums", className)} aria-label={rounded.toFixed(decimals)}>
       <SlidingNumber number={rounded} decimalPlaces={decimals} initiallyStable transition={spring.number} aria-hidden />
     </span>
   );

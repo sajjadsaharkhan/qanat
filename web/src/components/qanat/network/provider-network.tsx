@@ -68,7 +68,6 @@ export const ProviderNetworkCard = memo(function ProviderNetworkCard({
       type="button"
       onClick={() => onSelect(p.id)}
       aria-pressed={selected}
-      aria-label={`${p.name}: ${v.title}. Show details`}
       {...press}
       className={cn(
         // The top edge carries warning and broken states (design.md §5).
