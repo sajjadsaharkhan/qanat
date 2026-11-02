@@ -1,13 +1,17 @@
 package control
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 
 	"qanat/internal/core/netstats"
 	"qanat/internal/core/provider"
@@ -77,7 +81,10 @@ type eventNetwork struct {
 // recentLen is how many of the newest attempts the live traffic list shows.
 const recentLen = 25
 
-func (s *Server) adminNetwork(w http.ResponseWriter, r *http.Request, _ *db.GetUserRow) {
+// adminNetwork serves every signed-in user: the page is read-only health. Only
+// admins see the upstream accounts' labels (often a login email); everyone else
+// gets "Account 1", "Account 2"… per provider.
+func (s *Server) adminNetwork(w http.ResponseWriter, r *http.Request, actor *db.GetUserRow) {
 	ctx := r.Context()
 	now := time.Now()
 	reports := s.netReports(ctx)
@@ -93,9 +100,14 @@ func (s *Server) adminNetwork(w http.ResponseWriter, r *http.Request, _ *db.GetU
 		return
 	}
 	acctLabel := map[string]string{}
+	seen := map[string]int{}
 	dbAccounts := map[string][]db.ListAccountsRow{}
 	for _, a := range accounts {
 		acctLabel[a.ID] = a.Label
+		if actor.Role != "admin" {
+			seen[a.Provider]++
+			acctLabel[a.ID] = fmt.Sprintf("Account %d", seen[a.Provider])
+		}
 		dbAccounts[a.Provider] = append(dbAccounts[a.Provider], a)
 	}
 	routeLabel := map[string]string{"direct": "Direct"}
@@ -125,7 +137,7 @@ func (s *Server) adminNetwork(w http.ResponseWriter, r *http.Request, _ *db.GetU
 			}
 			pn.Stats = netstats.Summarize(nil, now, netstats.Window)
 			for _, a := range dbAccounts[pv.ID] {
-				pn.Accounts = append(pn.Accounts, accountNetwork{ID: a.ID, Label: a.Label, State: a.State, Disabled: a.DisabledAt != nil})
+				pn.Accounts = append(pn.Accounts, accountNetwork{ID: a.ID, Label: acctLabel[a.ID], State: a.State, Disabled: a.DisabledAt != nil})
 			}
 			out.Providers = append(out.Providers, pn)
 			continue
@@ -222,4 +234,98 @@ func orEmptyPoints(p []netstats.Point) []netstats.Point {
 		return []netstats.Point{}
 	}
 	return p
+}
+
+// --- model status (last 24 h, 30-minute buckets) -------------------------------
+
+type modelBucket struct {
+	T        time.Time `json:"t"`
+	Attempts int64     `json:"attempts"`
+	Faults   int64     `json:"faults"`
+}
+
+type modelStatus struct {
+	Provider     string        `json:"provider"`
+	Prefix       string        `json:"prefix"`
+	Model        string        `json:"model"`
+	Attempts     int64         `json:"attempts"`
+	Availability *float64      `json:"availability"`
+	TTFTP90MS    *int64        `json:"ttft_p90_ms"`
+	AvgLatencyMS *int64        `json:"avg_latency_ms"`
+	Buckets      []modelBucket `json:"buckets"`
+}
+
+type modelStatusResponse struct {
+	GeneratedAt   time.Time     `json:"generated_at"`
+	BucketSeconds int           `json:"bucket_seconds"`
+	SuccessRate   *float64      `json:"success_rate"`
+	Models        []modelStatus `json:"models"`
+}
+
+// networkModels is the Model Status section: every model with traffic in
+// the last 24 hours, one bar per 30 minutes. Like the rest of the page it
+// is informational: a Redis error leaves it empty rather than failing.
+func (s *Server) networkModels(w http.ResponseWriter, r *http.Request, _ *db.GetUserRow) {
+	ctx := r.Context()
+	now := time.Now()
+	first := netstats.ModelBucketStart(now).Add(-(netstats.ModelBuckets - 1) * netstats.ModelBucket)
+	out := modelStatusResponse{GeneratedAt: now, BucketSeconds: int(netstats.ModelBucket.Seconds()), Models: []modelStatus{}}
+	if s.rdb == nil {
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+
+	cmds := make([]*redis.MapStringStringCmd, netstats.ModelBuckets)
+	pipe := s.rdb.Pipeline()
+	for i := range cmds {
+		cmds[i] = pipe.HGetAll(ctx, netstats.ModelKey(first.Add(time.Duration(i)*netstats.ModelBucket)))
+	}
+	if _, err := pipe.Exec(ctx); err != nil {
+		s.log.Warn("model status unavailable", "err", err)
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+
+	type row struct {
+		total   netstats.ModelAgg
+		buckets []modelBucket
+	}
+	rows := map[netstats.ModelKeyID]*row{}
+	var all netstats.ModelAgg
+	for i, cmd := range cmds {
+		at := first.Add(time.Duration(i) * netstats.ModelBucket)
+		for id, agg := range netstats.ParseModelHash(cmd.Val()) {
+			rw := rows[id]
+			if rw == nil {
+				rw = &row{buckets: make([]modelBucket, netstats.ModelBuckets)}
+				for j := range rw.buckets {
+					rw.buckets[j].T = first.Add(time.Duration(j) * netstats.ModelBucket)
+				}
+				rows[id] = rw
+			}
+			rw.total.Merge(*agg)
+			all.Merge(*agg)
+			rw.buckets[i] = modelBucket{T: at, Attempts: agg.Attempts(), Faults: agg.Faults}
+		}
+	}
+	out.SuccessRate = all.Availability()
+	prefix := map[string]string{}
+	for _, p := range provider.All {
+		prefix[p.ID] = p.Prefix
+	}
+	for id, rw := range rows {
+		if rw.total.Attempts() == 0 {
+			continue
+		}
+		out.Models = append(out.Models, modelStatus{Provider: id.Provider, Prefix: prefix[id.Provider], Model: id.Model,
+			Attempts: rw.total.Attempts(), Availability: rw.total.Availability(), TTFTP90MS: rw.total.TTFTP90MS(),
+			AvgLatencyMS: rw.total.AvgLatencyMS(), Buckets: rw.buckets})
+	}
+	slices.SortFunc(out.Models, func(a, b modelStatus) int {
+		if c := cmp.Compare(b.Attempts, a.Attempts); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Model, b.Model)
+	})
+	writeJSON(w, http.StatusOK, out)
 }

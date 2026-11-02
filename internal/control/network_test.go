@@ -88,8 +88,70 @@ func TestAdminNetwork(t *testing.T) {
 		t.Fatalf("stale gateway not pruned: %d left", n)
 	}
 
-	// Admins only.
+	// Any signed-in user may look, but upstream account labels stay hidden.
+	var uid string
+	if err := h.s.pg.QueryRow(ctx, `INSERT INTO users (email, plan_id) SELECT 'dev@example.com', id FROM plans WHERE is_default RETURNING id`).Scan(&uid); err != nil {
+		t.Fatal(err)
+	}
+	var seen networkResponse
+	if st := h.do(h.signInAs(uid), "GET", "/api/admin/network", "", &seen); st != 200 {
+		t.Fatalf("user: %d", st)
+	}
+	if got := seen.Providers[0].Accounts[0].Label; got != "Account 1" {
+		t.Fatalf("user sees label %q", got)
+	}
+	if got := seen.Providers[0].Recent[0].AccountLabel; got != "Account 1" {
+		t.Fatalf("user sees event label %q", got)
+	}
+
+	// Signed in only.
 	if st := h.do(h.client(), "GET", "/api/admin/network", "", nil); st != 401 {
 		t.Fatalf("anonymous: %d", st)
+	}
+}
+
+// Model Status sums the gateways' per-bucket counters over the last 24 h and
+// lists only models that were used.
+func TestNetworkModels(t *testing.T) {
+	h := newHarness(t)
+	ctx := t.Context()
+	now := time.Now()
+	cur := netstats.ModelBucketStart(now)
+	old := cur.Add(-3 * netstats.ModelBucket)
+	gone := cur.Add(-30 * time.Hour)
+	keys := []string{netstats.ModelKey(cur), netstats.ModelKey(old), netstats.ModelKey(gone)}
+	h.s.rdb.Del(ctx, keys...)
+	t.Cleanup(func() { h.s.rdb.Del(context.Background(), keys...) })
+
+	add := func(at time.Time, model string, a netstats.ModelAgg) {
+		for f, n := range a.Fields(netstats.ModelKeyID{Provider: "claude", Model: model}) {
+			h.s.rdb.HIncrBy(ctx, netstats.ModelKey(at), f, n)
+		}
+	}
+	ok := netstats.ModelAgg{}
+	for range 9 {
+		ok.Add(netstats.Event{Outcome: netstats.OK, DurMS: 2000, TTFTMS: 300})
+	}
+	ok.Add(netstats.Event{Outcome: netstats.Failed, Reason: "connect"})
+	add(cur, "claude-opus-4-7", ok)
+	add(old, "claude-opus-4-7", ok) // a second gateway or bucket sums
+	add(gone, "claude-old", ok)     // outside the window
+
+	var out modelStatusResponse
+	if st := h.do(h.signInRoot(), "GET", "/api/network/models", "", &out); st != 200 {
+		t.Fatalf("status %d", st)
+	}
+	if len(out.Models) != 1 {
+		t.Fatalf("models: %+v", out.Models)
+	}
+	m := out.Models[0]
+	if m.Model != "claude-opus-4-7" || m.Prefix != "cc" || m.Attempts != 20 || *m.Availability != 0.9 || *m.AvgLatencyMS != 2000 || len(m.Buckets) != netstats.ModelBuckets {
+		t.Fatalf("model %+v", m)
+	}
+	if last := m.Buckets[netstats.ModelBuckets-1]; last.Attempts != 10 || last.Faults != 1 {
+		t.Fatalf("current bucket %+v", last)
+	}
+	if out.SuccessRate == nil || *out.SuccessRate != 0.9 {
+		t.Fatalf("success rate %v", out.SuccessRate)
 	}
 }

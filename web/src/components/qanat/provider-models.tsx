@@ -51,7 +51,8 @@ export function ProviderModelsCard({
 }: {
   provider: Schemas["ProviderInfo"];
   models: string[];
-  accounts: number;
+  /** Admin-only: the account count and the catalog refresh. Undefined hides both. */
+  accounts?: number;
 }) {
   const qc = useQueryClient();
   const catalog = api.useQuery("get", "/api/admin/providers/{provider}/models", {
@@ -85,27 +86,37 @@ export function ProviderModelsCard({
         <Tag tone="brand">
           <span className="font-mono">{provider.prefix}/</span>
         </Tag>
-        <span className="ms-auto text-meta text-muted-foreground">
-          {accounts === 0 ? "No accounts" : accounts === 1 ? "1 account" : `${accounts} accounts`}
-        </span>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="size-7"
-          onClick={doSync}
-          disabled={sync.isPending || accounts === 0}
-          aria-label={`Load ${provider.name} models from the provider`}
-        >
-          {sync.isPending ? <Loader2 aria-hidden className="size-3.5 animate-spin" /> : <RefreshCw aria-hidden className="size-3.5" />}
-        </Button>
+        {accounts !== undefined && (
+          <>
+            <span className="ms-auto text-meta text-muted-foreground">
+              {accounts === 0 ? "No accounts" : accounts === 1 ? "1 account" : `${accounts} accounts`}
+            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-7"
+              onClick={doSync}
+              disabled={sync.isPending || accounts === 0}
+              aria-label={`Load ${provider.name} models from the provider`}
+            >
+              {sync.isPending ? <Loader2 aria-hidden className="size-3.5 animate-spin" /> : <RefreshCw aria-hidden className="size-3.5" />}
+            </Button>
+          </>
+        )}
       </div>
       <p className="text-meta text-muted-foreground">
         Send <code className="font-mono">{provider.prefix}/&lt;model&gt;</code>: Qanat routes to this provider and strips the prefix.
       </p>
       {catalog.isPending ? null : stored.length === 0 ? (
         <p className="text-meta text-muted-foreground">
-          No stored catalog yet — press <RefreshCw aria-hidden className="inline size-3" /> to load the models the provider really serves.
+          {accounts === undefined ? (
+            "No models listed yet."
+          ) : (
+            <>
+              No stored catalog yet — press <RefreshCw aria-hidden className="inline size-3" /> to load the models the provider really serves.
+            </>
+          )}
         </p>
       ) : (
         <>

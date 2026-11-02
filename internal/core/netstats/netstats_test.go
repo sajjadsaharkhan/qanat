@@ -1,6 +1,7 @@
 package netstats
 
 import (
+	"strconv"
 	"testing"
 	"time"
 )
@@ -149,5 +150,34 @@ func TestMerge(t *testing.T) {
 		if m.Events[i].At.Before(m.Events[i-1].At) {
 			t.Fatal("events not oldest first")
 		}
+	}
+}
+
+func TestModelAgg(t *testing.T) {
+	var a ModelAgg
+	for i := 1; i <= 10; i++ {
+		a.Add(Event{Outcome: OK, DurMS: 1000, TTFTMS: int64(i) * 100})
+	}
+	if a.Add(Event{Outcome: Failed, Reason: "rate_limited"}) || a.Add(Event{Outcome: Aborted}) || a.Add(Event{Outcome: Rejected}) {
+		t.Fatal("non-faults counted")
+	}
+	if !a.Add(Event{Outcome: Failed, Reason: "status_503"}) || !a.Add(Event{Outcome: Failed, Reason: "connect"}) {
+		t.Fatal("faults not counted")
+	}
+	if a.Attempts() != 12 || *a.Availability() < 0.83 || *a.Availability() > 0.84 || *a.AvgLatencyMS() != 1000 {
+		t.Fatalf("agg %+v", a)
+	}
+	if p := *a.TTFTP90MS(); p < 500 || p > 1000 {
+		t.Fatalf("p90 %d", p)
+	}
+
+	id := ModelKeyID{"claude", "claude-opus-4-7"}
+	h := map[string]string{}
+	for f, n := range a.Fields(id) {
+		h[f] = strconv.FormatInt(n, 10)
+	}
+	got := ParseModelHash(h)[id]
+	if got == nil || *got != a {
+		t.Fatalf("round trip: %+v vs %+v", got, a)
 	}
 }

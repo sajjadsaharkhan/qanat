@@ -160,3 +160,28 @@ func TestAdmin_ResetQuota(t *testing.T) {
 		t.Fatalf("after reset %v", u)
 	}
 }
+
+// The Models page is for everyone: a normal user reads providers, catalogs
+// and prices, but cannot change prices, mappings or sync a catalog.
+func TestModels_ReadableByUsers(t *testing.T) {
+	h := newHarness(t)
+	var id string
+	if err := h.s.pg.QueryRow(context.Background(), `INSERT INTO users (email, plan_id) SELECT 'dev@example.com', id FROM plans WHERE is_default RETURNING id`).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	dev := h.signInAs(id)
+	for _, path := range []string{"/api/admin/providers", "/api/admin/prices", "/api/admin/providers/codex/models"} {
+		if st := h.do(dev, "GET", path, "", nil); st != 200 {
+			t.Fatalf("GET %s as user: %d", path, st)
+		}
+	}
+	if st := h.do(dev, "GET", "/api/admin/mappings", "", nil); st != 403 {
+		t.Fatalf("mappings as user: %d", st)
+	}
+	if st := h.do(dev, "POST", "/api/admin/providers/codex/models", "", nil); st != 403 {
+		t.Fatalf("sync as user: %d", st)
+	}
+	if st := h.do(dev, "POST", "/api/admin/prices", `{"model_id":"x","p_in":1,"p_out":1,"p_cache_read":1,"p_cache_write":1}`, nil); st != 403 {
+		t.Fatalf("set price as user: %d", st)
+	}
+}
