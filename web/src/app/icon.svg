@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -6 100 100">
+  <!-- QanatMark (state "still") from components/qanat/qanat-mark.tsx; colors are the foreground and primary tokens in globals.css. -->
+  <style>
+    .ink { stroke: #0c0a08; }
+    .water { stroke: #2a3723; }
+    .drop { fill: #2a3723; }
+    @media (prefers-color-scheme: dark) {
+      .ink { stroke: #e8e5dd; }
+      .water { stroke: #b9bba8; }
+      .drop { fill: #b9bba8; }
+    }
+  </style>
+  <g class="ink" fill="none" stroke-width="6" stroke-linecap="round">
+    <line x1="24" y1="14" x2="24" y2="59.92" />
+    <line x1="42" y1="14" x2="42" y2="62.08" />
+    <line x1="60" y1="14" x2="60" y2="64.24" />
+    <line x1="78" y1="14" x2="78" y2="66.4" />
+  </g>
+  <line class="water" x1="8" y1="62" x2="86" y2="71.36" fill="none" stroke-width="6" stroke-linecap="round" />
+  <circle class="drop" cx="92" cy="72.08" r="5" />
+</svg>
