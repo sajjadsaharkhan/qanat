@@ -11,6 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
+
 	"qanat/internal/core/secretbox"
 	"qanat/internal/proxy"
 	"qanat/internal/store/storetest"
@@ -328,4 +331,49 @@ func TestSend_AuthKindAndDisabledSkip(t *testing.T) {
 	if len(ids) != 1 || ids[0] != "on" {
 		t.Fatalf("candidates must skip disabled accounts: %v", ids)
 	}
+}
+
+// Upstream 4xx reach the client unchanged, so they're counted per account
+// and model; an empty pool is "no_account", not "pool_exhausted".
+func TestForward_MetricsSplitUpstreamAndPool(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		io.WriteString(w, `{"type":"error","error":{"type":"permission_error","message":"nope"}}`)
+	}))
+	defer up.Close()
+	s := &Snapshot{Gen: 1, accounts: map[string][]*Account{"claude": {
+		{ID: "m403", Provider: "claude", State: "healthy", BaseURL: up.URL, Origin: up.URL, Proxies: []*proxy.Spec{nil}},
+	}}, sticky: map[string]string{}}
+	g := newTestGateway()
+	g.health = proxy.NewHealth()
+	g.log = slog.New(slog.NewTextHandler(io.Discard, nil))
+	rt := &route{caller: &caller{snap: s, user: &User{ID: "u1"}, key: &Key{}, plan: &Plan{}}, name: "m", body: []byte(`{}`),
+		members: []Member{{Provider: "claude", Model: "m"}}}
+	fwd := func() int {
+		w := httptest.NewRecorder()
+		g.forward(w, httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", nil), rt, forwardOpts{reqID: "r", start: time.Now(), remaining: -1})
+		return w.Code
+	}
+
+	if c := fwd(); c != http.StatusForbidden {
+		t.Fatalf("status %d, want the upstream 403", c)
+	}
+	if n := counterValue(upstreamResponses.WithLabelValues("claude", "m403", "m", "403")); n != 1 {
+		t.Fatalf("upstream 403 counted %v times", n)
+	}
+
+	s.accounts["claude"][0].Disabled = true
+	before := counterValue(rejections.WithLabelValues("pool_exhausted"))
+	if c := fwd(); c != 529 {
+		t.Fatalf("status %d, want 529", c)
+	}
+	if counterValue(rejections.WithLabelValues("no_account")) < 1 || counterValue(rejections.WithLabelValues("pool_exhausted")) != before {
+		t.Fatal("an empty pool must count as no_account only")
+	}
+}
+
+func counterValue(c prometheus.Counter) float64 {
+	var m dto.Metric
+	c.Write(&m)
+	return m.GetCounter().GetValue()
 }
