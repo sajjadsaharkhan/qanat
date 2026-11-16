@@ -20,7 +20,28 @@ var (
 	upstreamTTFT = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name: "qanat_upstream_ttft_seconds", Help: "Upstream time to first byte.",
 		Buckets: prometheus.ExponentialBuckets(.05, 2, 10),
-	}, []string{"provider"})
+	}, []string{"provider", "model"})
+
+	// Every upstream HTTP answer, 4xx included: those reach the client
+	// unchanged and never show in qanat_upstream_errors_total.
+	upstreamResponses = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "qanat_upstream_responses_total", Help: "Upstream HTTP responses by provider, account, upstream model and status.",
+	}, []string{"provider", "account", "model", "status"})
+
+	// Client side, as the gateway sees it. Failures before a request reaches
+	// the gateway (DNS, TLS, edge) are only visible in the nginx access log.
+	clientTTFT = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "qanat_client_ttft_seconds", Help: "Request received to first byte written to the client.",
+		Buckets: prometheus.ExponentialBuckets(.05, 2, 10),
+	}, []string{"provider", "model"})
+
+	clientDisconnects = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "qanat_client_disconnects_total", Help: "Clients that went away, by endpoint and stage (before_response, mid_stream).",
+	}, []string{"endpoint", "stage"})
+
+	unpricedRequests = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "qanat_unpriced_requests_total", Help: "Requests refused because the upstream model has no confirmed price.",
+	}, []string{"model"})
 
 	activeStreams = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "qanat_active_streams", Help: "Responses currently being streamed.",

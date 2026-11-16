@@ -185,6 +185,7 @@ func (g *Gateway) resolve(w http.ResponseWriter, r *http.Request, c *caller, end
 	}
 	t, ok := c.snap.Resolve(name)
 	if !ok {
+		rejections.WithLabelValues("unknown_model").Inc() // no model label: the name is client input
 		return fail(http.StatusNotFound, "not_found_error", fmt.Sprintf("Qanat has no model called %q.", name))
 	}
 	rt := &route{caller: c, name: name, body: body, mStart: s, mEnd: e}
@@ -202,6 +203,10 @@ func (g *Gateway) resolve(w http.ResponseWriter, r *http.Request, c *caller, end
 	if len(rt.members) == 0 {
 		// Name the upstream ids that need a price: that is what the admin
 		// prices, not the prefixed or mapped name the client sent.
+		rejections.WithLabelValues("unpriced_model").Inc()
+		for _, m := range unpriced {
+			unpricedRequests.WithLabelValues(m).Inc() // configured ids only: bounded
+		}
 		return fail(http.StatusForbidden, "permission_error",
 			fmt.Sprintf("The model %q has no confirmed price yet, so it can't be used. Ask an admin to confirm a price for %s.", name, quoteAll(unpriced)))
 	}

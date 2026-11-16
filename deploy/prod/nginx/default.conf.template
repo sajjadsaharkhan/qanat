@@ -7,6 +7,15 @@ map $http_x_forwarded_proto $qanat_proto {
     ""      $scheme;
 }
 
+# Edge view of every request, for telling client↔Qanat trouble from
+# Qanat↔upstream: status 499 with us=- is a client that left before the
+# gateway answered; 502/504 with us set is nginx↔gateway; a status the
+# gateway also counts in qanat_requests_total came from the gateway.
+log_format qanat_edge escape=json '{"t":"$time_iso8601","ip":"$http_x_forwarded_for","req":"$request_method $uri",'
+    '"status":$status,"bytes":$body_bytes_sent,"rt":$request_time,'
+    '"us":"$upstream_status","uct":"$upstream_connect_time","urt":"$upstream_response_time",'
+    '"ua":"$http_user_agent"}';
+
 upstream qanat_gateway {
     server gateway:8080;
     keepalive 64;
@@ -44,6 +53,7 @@ server {
     # Gateway: PRD §12.1 SSE settings. The trailing slash on proxy_pass strips
     # /gateway, so /gateway/v1/messages reaches the gateway as /v1/messages.
     location /gateway/ {
+        access_log /dev/stdout qanat_edge;
         proxy_pass http://qanat_gateway/;
         proxy_buffering off;
         proxy_request_buffering off;

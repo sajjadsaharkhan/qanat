@@ -40,6 +40,12 @@ var Defaults = map[string]Price{
 	"claude-opus-5-5-medium":     {In: 4.00, Out: 20.00, CacheRead: 0.20, CacheWrite: 5.00},
 	"claude-opus-5-5-low":        {In: 4.00, Out: 20.00, CacheRead: 0.20, CacheWrite: 5.00},
 	"claude-fable-5":             {In: 10.00, Out: 50.00, CacheRead: 1.00, CacheWrite: 12.50},
+	"claude-fable-5-1":           {In: 10.00, Out: 50.00, CacheRead: 1.00, CacheWrite: 12.50},
+	"claude-opus-5":              {In: 5.00, Out: 25.00, CacheRead: 0.50, CacheWrite: 6.25},
+	"claude-opus-4-8":            {In: 5.00, Out: 25.00, CacheRead: 0.50, CacheWrite: 6.25},
+	"claude-opus-4-7":            {In: 5.00, Out: 25.00, CacheRead: 0.50, CacheWrite: 6.25},
+	// ponytail: flat ≤100K-prompt rate; Anthropic bills $0.50/$2.50 past 100K, so long Haiku prompts are under-charged until tiered prices exist.
+	"claude-haiku-5-5":           {In: 0.10, Out: 0.50, CacheRead: 0.01, CacheWrite: 0.125},
 	"claude-sonnet-5-5":          {In: 2.00, Out: 10.00, CacheRead: 0.20, CacheWrite: 2.50},
 	"claude-sonnet-5-5-thinking": {In: 2.00, Out: 10.00, CacheRead: 0.20, CacheWrite: 2.50},
 	"claude-sonnet-5-5-high":     {In: 2.00, Out: 10.00, CacheRead: 0.20, CacheWrite: 2.50},

@@ -170,6 +170,7 @@ func (g *Gateway) forward(w http.ResponseWriter, r *http.Request, rt *route, o f
 				}
 				if r.Context().Err() != nil {
 					requestsTotal.WithLabelValues(endpoint, "499").Inc()
+					clientDisconnects.WithLabelValues(endpoint, "before_response").Inc()
 					return // client went away before anything was sent
 				}
 				proxyErrors.WithLabelValues(proxyLabel(sp), "connect").Inc()
@@ -180,6 +181,7 @@ func (g *Gateway) forward(w http.ResponseWriter, r *http.Request, rt *route, o f
 				g.net.record(m.Provider, netstats.Event{Account: a.ID, Model: m.Model, Outcome: netstats.Failed, Reason: "connect", DurMS: time.Since(attempt).Milliseconds()})
 				continue
 			}
+			upstreamResponses.WithLabelValues(m.Provider, a.ID, m.Model, strconv.Itoa(resp.StatusCode)).Inc()
 			if resp.StatusCode == http.StatusUnauthorized && a.AuthKind == "oauth" {
 				// An expired or revoked sign-in: nothing reached the client,
 				// so fail over and have the control plane refresh it.
@@ -215,24 +217,25 @@ func (g *Gateway) forward(w http.ResponseWriter, r *http.Request, rt *route, o f
 		apiError(w, http.StatusNotFound, "not_found_error",
 			fmt.Sprintf("The model %q routes to %s, which this Qanat doesn't support yet.", rt.name, strings.Join(unsupported, ", ")))
 		requestsTotal.WithLabelValues(endpoint, "404").Inc()
+		rejections.WithLabelValues("unsupported_provider").Inc()
+		return
 	case tried == 0:
 		// REQ-ERR-04: distinct from "your quota is exhausted".
 		w.Header().Set("Retry-After", "60")
 		apiError(w, 529, "overloaded_error", "No upstream account is available for this model right now. This is not your quota; ask an admin to connect or check the accounts.")
 		requestsTotal.WithLabelValues(endpoint, "529").Inc()
+		rejections.WithLabelValues("no_account").Inc() // every account benched, cooling down or out of headroom
 	default:
 		w.Header().Set("Retry-After", "30")
 		apiError(w, 529, "overloaded_error", "Every upstream account is busy or rate-limited right now (the shared pool is exhausted). This is not your quota; try again shortly.")
 		requestsTotal.WithLabelValues(endpoint, "529").Inc()
+		rejections.WithLabelValues("pool_exhausted").Inc() // accounts were tried and all failed
 	}
-	rejections.WithLabelValues("pool_exhausted").Inc()
-	if tried > 0 || len(unsupported) == 0 {
-		seen := map[string]bool{}
-		for _, m := range rt.members {
-			if _, ok := defaultBaseURL[m.Provider]; ok && !seen[m.Provider] {
-				seen[m.Provider] = true
-				g.net.record(m.Provider, netstats.Event{Model: m.Model, Status: 529, Outcome: netstats.Rejected, Reason: "pool_exhausted"})
-			}
+	seen := map[string]bool{}
+	for _, m := range rt.members {
+		if _, ok := defaultBaseURL[m.Provider]; ok && !seen[m.Provider] {
+			seen[m.Provider] = true
+			g.net.record(m.Provider, netstats.Event{Model: m.Model, Status: 529, Outcome: netstats.Rejected, Reason: "pool_exhausted"})
 		}
 	}
 }
@@ -366,10 +369,12 @@ func (g *Gateway) stream(w http.ResponseWriter, r *http.Request, rt *route, o fo
 		if n > 0 {
 			if firstByte.IsZero() {
 				firstByte = time.Now()
-				upstreamTTFT.WithLabelValues(m.Provider).Observe(firstByte.Sub(attempt).Seconds())
+				upstreamTTFT.WithLabelValues(m.Provider, m.Model).Observe(firstByte.Sub(attempt).Seconds())
+				clientTTFT.WithLabelValues(m.Provider, m.Model).Observe(firstByte.Sub(o.start).Seconds())
 			}
 			if _, werr := w.Write(buf[:n]); werr != nil {
 				aborted, errMsg = true, "client disconnected"
+				clientDisconnects.WithLabelValues(endpoint, "mid_stream").Inc()
 				break // returning cancels r.Context(), which cancels upstream
 			}
 			rc.Flush()
@@ -386,6 +391,7 @@ func (g *Gateway) stream(w http.ResponseWriter, r *http.Request, rt *route, o fo
 			aborted = true
 			if r.Context().Err() != nil {
 				errMsg = "client disconnected"
+				clientDisconnects.WithLabelValues(endpoint, "mid_stream").Inc()
 			} else {
 				errMsg = "upstream connection lost"
 				upstreamErrors.WithLabelValues(m.Provider, a.ID, "mid_stream").Inc()
