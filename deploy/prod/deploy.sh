@@ -6,6 +6,9 @@
 #   deploy/prod/deploy.sh abc1234     # deploy (or roll back to) a commit's images
 #   deploy/prod/deploy.sh --no-pull   # restart with images already on the server
 #   deploy/prod/deploy.sh --dry-run   # show what would be deployed; change nothing
+#   deploy/prod/deploy.sh --mirror    # pull postgres/redis/nginx via docker.arvancloud.ir
+#   deploy/prod/deploy.sh --mirror=host  # ...or via another Docker Hub mirror
+#   DOCKERHUB_MIRROR=host deploy/prod/deploy.sh   # same, from the environment
 #   IMAGE_TAG=abc1234 deploy/prod/deploy.sh
 #
 # Server requirements: Docker with compose v2, make, openssl, curl,
@@ -32,6 +35,8 @@ for arg in "$@"; do
   case "$arg" in
     --no-pull) NO_PULL=true ;;
     --dry-run) DRY_RUN=true ;;
+    --mirror) export DOCKERHUB_MIRROR=docker.arvancloud.ir ;;
+    --mirror=?*) export DOCKERHUB_MIRROR="${arg#--mirror=}" ;;
     --*) echo "Unknown flag: $arg"; exit 1 ;;
     *) TAG_ARG="$arg" ;;
   esac
