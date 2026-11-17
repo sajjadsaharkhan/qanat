@@ -1,3 +1,9 @@
+/**
+ * Claude Code's request timeout: 50 minutes, so long reasoning or a slow
+ * translated provider isn't cut off client-side (the default is 10 minutes).
+ */
+export const apiTimeoutMs = "3000000";
+
 /** The Claude Code settings.json snippet from PRD §4.1. */
 export function settingsSnippet(gatewayUrl: string, key: string): string {
   return JSON.stringify(
@@ -5,6 +11,7 @@ export function settingsSnippet(gatewayUrl: string, key: string): string {
       env: {
         ANTHROPIC_BASE_URL: gatewayUrl,
         ANTHROPIC_AUTH_TOKEN: key,
+        API_TIMEOUT_MS: apiTimeoutMs,
         ANTHROPIC_DEFAULT_OPUS_MODEL: "opus",
         ANTHROPIC_DEFAULT_SONNET_MODEL: "sonnet",
         ANTHROPIC_DEFAULT_HAIKU_MODEL: "haiku",
@@ -148,7 +155,7 @@ export function settingsTemplate(opts: { gatewayUrl: string; key: string; slots:
   const env: Record<string, string> = {
     ANTHROPIC_AUTH_TOKEN: opts.key,
     ANTHROPIC_BASE_URL: opts.gatewayUrl,
-    API_TIMEOUT_MS: "3000000",
+    API_TIMEOUT_MS: apiTimeoutMs,
   };
   if (opts.slots.haiku) env.ANTHROPIC_DEFAULT_HAIKU_MODEL = setupModelName(opts.slots.haiku);
   if (opts.slots.sonnet) env.ANTHROPIC_DEFAULT_SONNET_MODEL = setupModelName(opts.slots.sonnet);

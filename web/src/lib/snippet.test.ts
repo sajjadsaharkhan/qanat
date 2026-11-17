@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { latestClaude, prettyModelName, settingsTemplate, setupModelName, supports1M } from "./snippet";
+import { latestClaude, prettyModelName, settingsSnippet, settingsTemplate, setupModelName, supports1M } from "./snippet";
 
 describe("supports1M and setupModelName", () => {
   it("detects 1M models and appends [1m]", () => {
@@ -97,4 +97,12 @@ describe("prettyModelName", () => {
     ["ag/gemini-3.8-flash-high[1m]", "Gemini 3.8 Flash High"],
     ["gemini-3.8-flash-high[1m]", "Gemini 3.8 Flash High"],
   ])("%s → %s", (m, want) => expect(prettyModelName(m)).toBe(want));
+});
+
+describe("settingsSnippet", () => {
+  it("sets the 50-minute request timeout", () => {
+    const env = JSON.parse(settingsSnippet("https://q.example/gateway", "qk_1")).env;
+    expect(env.API_TIMEOUT_MS).toBe("3000000");
+    expect(env.ANTHROPIC_BASE_URL).toBe("https://q.example/gateway");
+  });
 });

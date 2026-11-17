@@ -35,6 +35,9 @@ func (g *Gateway) sendAntigravity(r *http.Request, a *Account, sp *proxy.Spec, b
 		// only sizes its context with this, so ~4 bytes a token will do.
 		return anthropicResponse(http.StatusOK, fmt.Appendf(nil, `{"input_tokens":%d}`, len(body)/4)), nil
 	}
+	if body, err = g.inlineURLMedia(r.Context(), sp, body); err != nil {
+		return anthropicResponse(http.StatusBadRequest, errorJSON("invalid_request_error", err.Error())), nil
+	}
 	session := r.Header.Get("X-Claude-Code-Session-Id")
 	tr, err := antigravity.Translate(body, antigravity.Options{Model: model, Project: a.Project, Session: a.ID + ":" + session})
 	if err != nil {
@@ -69,7 +72,7 @@ func (g *Gateway) sendAntigravity(r *http.Request, a *Account, sp *proxy.Spec, b
 	if tr.Stream {
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: st}, nil
 	}
-	msg, err := antigravity.Collect(st)
+	msg, err := protocol.Collect(st)
 	st.Close()
 	if err != nil {
 		return nil, fmt.Errorf("antigravity: %w", err) // nothing sent yet: the next account may answer
