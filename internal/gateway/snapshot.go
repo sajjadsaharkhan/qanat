@@ -101,6 +101,7 @@ type Account struct {
 	Origin                string // scheme://host of the upstream, for proxy health
 	Token                 string // decrypted access token; never logged
 	Project               string // Antigravity's Cloud Code project, from sign-in
+	ChatGPTAccount        string // Codex: the ChatGPT account (workspace) the token is bound to
 	State                 string
 	// AuthKind is how Token authenticates upstream: "token" sends
 	// Authorization: Bearer (e.g. a token from `claude setup-token`), "api_key"
@@ -470,7 +471,7 @@ func build(ctx context.Context, q *db.Queries, box *secretbox.Box, log *slog.Log
 			acct.CooldownUntil = *a.CooldownUntil
 		}
 		if len(a.Credentials) > 0 {
-			acct.Token, acct.Project, err = openToken(box, a.ID, a.Credentials)
+			acct.Token, acct.Project, acct.ChatGPTAccount, err = openToken(box, a.ID, a.Credentials)
 			if err != nil {
 				log.Error("account credentials unreadable; skipping account", "account", a.ID, "err", err)
 				continue
@@ -515,22 +516,23 @@ type proxySetting struct {
 // Credentials is the sealed JSON stored in provider_accounts.credentials.
 type Credentials struct {
 	AccessToken string `json:"access_token"`
-	ProjectID   string `json:"project_id,omitempty"` // Antigravity only
+	ProjectID   string `json:"project_id,omitempty"`         // Antigravity only
+	AccountID   string `json:"chatgpt_account_id,omitempty"` // Codex only
 }
 
-func openToken(box *secretbox.Box, accountID string, sealed []byte) (token, project string, err error) {
+func openToken(box *secretbox.Box, accountID string, sealed []byte) (token, project, chatgptAccount string, err error) {
 	if box == nil {
-		return "", "", errNoMasterKey
+		return "", "", "", errNoMasterKey
 	}
 	plain, err := box.Open(sealed, []byte(accountID))
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	var c Credentials
 	if err := json.Unmarshal(plain, &c); err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
-	return c.AccessToken, c.ProjectID, nil
+	return c.AccessToken, c.ProjectID, c.AccountID, nil
 }
 
 type gwError string

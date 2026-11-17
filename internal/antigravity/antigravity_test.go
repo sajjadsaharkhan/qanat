@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"qanat/internal/protocol"
 )
 
 func translate(t *testing.T, body string, model string) envelope {
@@ -168,7 +170,7 @@ func TestStream(t *testing.T) {
 // What the client keeps from an answer and sends back reproduces the
 // signature on the same function call.
 func TestSignatureRoundTrip(t *testing.T) {
-	msg, err := Collect(NewStream(io.NopCloser(strings.NewReader(upstream)), "m", nil))
+	msg, err := protocol.Collect(NewStream(io.NopCloser(strings.NewReader(upstream)), "m", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +204,7 @@ func TestStream_UpstreamErrorAndEmpty(t *testing.T) {
 	if !strings.Contains(string(out), "event: error") {
 		t.Fatalf("%s", out)
 	}
-	if _, err := Collect(strings.NewReader(string(out))); err == nil {
+	if _, err := protocol.Collect(strings.NewReader(string(out))); err == nil {
 		t.Fatal("Collect hides the error")
 	}
 }

@@ -1,4 +1,4 @@
-package antigravity
+package protocol
 
 import (
 	"bufio"
@@ -77,7 +77,7 @@ func Collect(r io.Reader) ([]byte, error) {
 		return nil, err
 	}
 	if msg == nil {
-		return nil, errors.New("Antigravity ended the response without any content")
+		return nil, errors.New("the provider ended the response without any content")
 	}
 	if blocks == nil {
 		blocks = []map[string]any{}

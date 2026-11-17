@@ -22,7 +22,7 @@ import (
 )
 
 // defaultBaseURL per provider; an account's base_url overrides it.
-var defaultBaseURL = map[string]string{"claude": "https://api.anthropic.com", "antigravity": oauth.AntigravityAPIURL}
+var defaultBaseURL = map[string]string{"claude": "https://api.anthropic.com", "codex": oauth.CodexAPIURL, "antigravity": oauth.AntigravityAPIURL}
 
 // Request headers never forwarded upstream: hop-by-hop, the caller's Qanat
 // key (it must never reach a provider), cookies, and client network details.
@@ -258,7 +258,10 @@ func (g *Gateway) bindSticky(rt *route, provider, accountID string) {
 // the client's context so a disconnect cancels it immediately
 // (REQ-PERF-03).
 func (g *Gateway) send(r *http.Request, a *Account, sp *proxy.Spec, body []byte) (*http.Response, error) {
-	if a.Provider == "antigravity" {
+	switch a.Provider {
+	case "codex":
+		return g.sendCodex(r, a, sp, body)
+	case "antigravity":
 		return g.sendAntigravity(r, a, sp, body)
 	}
 	url := strings.TrimSuffix(a.baseURL(), "/") + r.URL.Path
@@ -362,6 +365,11 @@ func (g *Gateway) stream(w http.ResponseWriter, r *http.Request, rt *route, o fo
 	bufp := bufPool.Get().(*[]byte)
 	defer bufPool.Put(bufp)
 	buf := *bufp
+	out := &sseWriter{w: w, rc: rc}
+	if sse && m.Provider != "claude" { // Claude passes through untouched and pings itself
+		out.keepAlive()
+		defer out.stopKeepAlive()
+	}
 	var firstByte time.Time
 	aborted, errMsg := false, ""
 	for {
@@ -372,12 +380,11 @@ func (g *Gateway) stream(w http.ResponseWriter, r *http.Request, rt *route, o fo
 				upstreamTTFT.WithLabelValues(m.Provider, m.Model).Observe(firstByte.Sub(attempt).Seconds())
 				clientTTFT.WithLabelValues(m.Provider, m.Model).Observe(firstByte.Sub(o.start).Seconds())
 			}
-			if _, werr := w.Write(buf[:n]); werr != nil {
+			if werr := out.write(buf[:n]); werr != nil {
 				aborted, errMsg = true, "client disconnected"
 				clientDisconnects.WithLabelValues(endpoint, "mid_stream").Inc()
 				break // returning cancels r.Context(), which cancels upstream
 			}
-			rc.Flush()
 			if sse {
 				scanner.Write(buf[:n])
 			} else if charge && body.Len() < 4<<20 {
@@ -397,13 +404,13 @@ func (g *Gateway) stream(w http.ResponseWriter, r *http.Request, rt *route, o fo
 				upstreamErrors.WithLabelValues(m.Provider, a.ID, "mid_stream").Inc()
 				proxyErrors.WithLabelValues(proxyLabel(sp), "mid_stream").Inc()
 				if sse {
-					io.WriteString(w, errorEvent)
-					rc.Flush()
+					out.write([]byte(errorEvent))
 				}
 			}
 			break
 		}
 	}
+	out.stopKeepAlive() // nothing may follow message_stop
 	end := time.Now()
 	nev := netstats.Event{At: end, Account: a.ID, Model: m.Model, Status: resp.StatusCode, Outcome: netstats.OK, DurMS: end.Sub(attempt).Milliseconds()}
 	switch {
