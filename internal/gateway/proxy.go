@@ -34,6 +34,9 @@ var dropRequest = map[string]bool{
 	"Authorization": true, "X-Api-Key": true, "Cookie": true,
 	"X-Forwarded-For": true, "X-Forwarded-Proto": true, "X-Forwarded-Host": true, "X-Real-Ip": true, "Forwarded": true,
 	"X-Qanat-Account": true,
+	// A browser (the dashboard's Playground) adds these; Anthropic reads an
+	// Origin as a CORS request, and none of them come from the CLI.
+	"Origin": true, "Referer": true, "Accept-Language": true, "Dnt": true,
 }
 
 // Response headers not passed back: hop-by-hop and account-scoped cookies.
@@ -207,8 +210,7 @@ func (g *Gateway) forward(w http.ResponseWriter, r *http.Request, rt *route, o f
 				upstreamErrors.WithLabelValues(m.Provider, a.ID, "unauthorized").Inc()
 				g.net.record(m.Provider, netstats.Event{Account: a.ID, Model: m.Model, Status: resp.StatusCode, Outcome: netstats.Failed, Reason: "unauthorized",
 					DurMS: time.Since(attempt).Milliseconds()})
-				io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
-				resp.Body.Close()
+				g.logRefusal(a, resp)
 				continue
 			}
 			if retryable(resp.StatusCode) {
@@ -220,8 +222,7 @@ func (g *Gateway) forward(w http.ResponseWriter, r *http.Request, rt *route, o f
 				upstreamErrors.WithLabelValues(m.Provider, a.ID, reason).Inc()
 				g.net.record(m.Provider, netstats.Event{Account: a.ID, Model: m.Model, Status: resp.StatusCode, Outcome: netstats.Failed, Reason: reason,
 					DurMS: time.Since(attempt).Milliseconds()})
-				io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
-				resp.Body.Close()
+				g.logRefusal(a, resp)
 				continue
 			}
 			g.served(rt, m.Provider, a.ID)
@@ -259,6 +260,18 @@ func (g *Gateway) forward(w http.ResponseWriter, r *http.Request, rt *route, o f
 			g.net.record(m.Provider, netstats.Event{Model: m.Model, Status: 529, Outcome: netstats.Rejected, Reason: "pool_exhausted"})
 		}
 	}
+}
+
+// logRefusal drains and closes a response the gateway is failing over from,
+// logging its status and the start of its error body: the client only ever
+// sees "pool exhausted", so this is the one place the real reason shows.
+func (g *Gateway) logRefusal(a *Account, resp *http.Response) {
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	resp.Body.Close()
+	if len(b) > 300 {
+		b = b[:300]
+	}
+	g.log.Warn("upstream refused; failing over", "account", a.ID, "provider", a.Provider, "status", resp.StatusCode, "body", string(b))
 }
 
 // pinned is the one account the Playground asked for: it must belong to the
@@ -323,7 +336,7 @@ func (g *Gateway) send(r *http.Request, a *Account, sp *proxy.Spec, body []byte)
 		return nil, err
 	}
 	for k, v := range r.Header { // REQ-PASS-05: anthropic-* pass unchanged
-		if !dropRequest[k] {
+		if !dropRequest[k] && !strings.HasPrefix(k, "Sec-") {
 			req.Header[k] = v
 		}
 	}
@@ -350,7 +363,9 @@ func (g *Gateway) send(r *http.Request, a *Account, sp *proxy.Spec, body []byte)
 					req.Header.Set("anthropic-beta", beta+","+oauth.OAuthBeta)
 				}
 			}
-			if req.Header.Get("User-Agent") == "" {
+			// A subscription token is only for the CLI: any other client's UA
+			// (a browser's, an SDK's) is replaced, as is a missing one.
+			if !strings.HasPrefix(req.Header.Get("User-Agent"), "claude-cli/") {
 				req.Header.Set("User-Agent", oauth.ClaudeUserAgent)
 			}
 		}

@@ -1,8 +1,8 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { FlaskConical, ImagePlus, Play, Square, Trash2, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Check, FlaskConical, ImagePlus, Play, Search, Square, Trash2, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { toast } from "sonner";
 
 import { EmptyState, PageHeader, SectionHeader, Tag } from "@/components/qanat/page";
@@ -173,7 +173,9 @@ export default function PlaygroundPage() {
     const content: unknown[] = [];
     if (image) content.push({ type: "image", source: { type: "base64", media_type: image.type, data: image.data } });
     content.push({ type: "text", text: prompt.trim() || "Describe this image." });
-    const body = JSON.stringify({ model, max_tokens: Math.max(1, Number(maxTokens) || 512), stream: true, messages: [{ role: "user", content }] });
+    // Claude subscription accounts only serve Claude Code: its system prompt is part of every request it makes.
+    const system = model.startsWith("cc/") ? [{ type: "text", text: "You are Claude Code, Anthropic's official CLI for Claude." }] : undefined;
+    const body = JSON.stringify({ model, max_tokens: Math.max(1, Number(maxTokens) || 512), stream: true, system, messages: [{ role: "user", content }] });
 
     const t0 = performance.now();
     startedAt.current = t0;
@@ -282,18 +284,7 @@ export default function PlaygroundPage() {
 
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="pg-model">Model</Label>
-              <Select value={model} onValueChange={setPicked} disabled={!modelOptions.length}>
-                <SelectTrigger id="pg-model" className="w-full font-mono">
-                  <SelectValue placeholder={models.isPending ? "Loading models…" : "No model available"} />
-                </SelectTrigger>
-                <SelectContent>
-                  {modelOptions.map((m) => (
-                    <SelectItem key={m} value={m} className="font-mono">
-                      {m}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <ModelSearch id="pg-model" options={modelOptions} value={model} onChange={setPicked} loading={models.isPending} />
               {models.error && <p className="text-meta text-destructive-text">{errorMessage(models.error)}</p>}
             </div>
 
@@ -471,5 +462,77 @@ function Legend({ c, t }: { c: string; t: string }) {
       <span aria-hidden className={cn("size-2 rounded-full", c)} />
       {t}
     </span>
+  );
+}
+
+/** A searchable model list: type to filter, ↑/↓ to move, Enter or click to pick. */
+function ModelSearch({ id, options, value, onChange, loading }: { id: string; options: string[]; value: string; onChange: (m: string) => void; loading: boolean }) {
+  const [query, setQuery] = useState("");
+  const [active, setActive] = useState(0);
+  const listRef = useRef<HTMLDivElement>(null);
+  const q = query.trim().toLowerCase();
+  const shown = useMemo(() => options.filter((m) => m.toLowerCase().includes(q)), [options, q]);
+  const activeIndex = Math.min(active, Math.max(shown.length - 1, 0));
+
+  useEffect(() => {
+    listRef.current?.querySelector(`[data-index="${activeIndex}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex]);
+
+  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      setActive(Math.min(Math.max(activeIndex + (e.key === "ArrowDown" ? 1 : -1), 0), Math.max(shown.length - 1, 0)));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (shown[activeIndex]) onChange(shown[activeIndex]);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="relative">
+        <Search aria-hidden className="pointer-events-none absolute start-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          id={id}
+          role="combobox"
+          aria-expanded="true"
+          aria-controls={`${id}-list`}
+          aria-activedescendant={shown[activeIndex] ? `${id}-option-${activeIndex}` : undefined}
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setActive(0);
+          }}
+          onKeyDown={onKeyDown}
+          placeholder={value ? `Search models — now ${value}` : "Search models"}
+          autoComplete="off"
+          className="ps-8"
+        />
+      </div>
+      <div ref={listRef} id={`${id}-list`} role="listbox" aria-label="Models" className="h-44 overflow-y-auto overscroll-contain rounded-md border">
+        {shown.length === 0 ? (
+          <div className="flex h-full items-center justify-center px-6 text-center text-meta text-muted-foreground">
+            {loading ? "Loading models…" : query ? <>No model matches “{query}”.</> : "No model available for this route."}
+          </div>
+        ) : (
+          shown.map((m, i) => (
+            <div
+              key={m}
+              id={`${id}-option-${i}`}
+              data-index={i}
+              role="option"
+              aria-selected={m === value}
+              onMouseDown={(e) => e.preventDefault()} // keep focus in the search box
+              onMouseEnter={() => setActive(i)}
+              onClick={() => onChange(m)}
+              className={cn("flex min-h-9 cursor-pointer items-center gap-2 px-3 py-1.5 transition-colors duration-150", i === activeIndex && "bg-muted", m === value && "bg-brand-soft")}
+            >
+              <Check aria-hidden className={cn("size-4 shrink-0 text-brand-text", m !== value && "invisible")} />
+              <span className="min-w-0 flex-1 truncate font-mono text-sm">{m}</span>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
   );
 }

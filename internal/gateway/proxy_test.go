@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -422,5 +423,48 @@ func TestForward_AdminPinsAccount(t *testing.T) {
 	w = run(false)
 	if hit["a1"] != 1 || w.Header().Get("X-Qanat-Account") != "" {
 		t.Fatalf("a regular user must not pin or see routing: hits %v, %v", hit, w.Header())
+	}
+}
+
+// A browser caller (the dashboard's Playground) must look like Claude Code to
+// a subscription account: its UA is replaced and its browser-only headers
+// never reach the provider.
+func TestForward_OAuthDropsBrowserIdentity(t *testing.T) {
+	var got http.Header
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"usage":{}}`)
+	}))
+	defer up.Close()
+	s := &Snapshot{Gen: 1, accounts: map[string][]*Account{"claude": {
+		{ID: "a1", Provider: "claude", State: "healthy", AuthKind: "oauth", Token: "t", BaseURL: up.URL, Origin: up.URL, Proxies: []*proxy.Spec{nil}},
+	}}, sticky: map[string]string{}}
+	g := newTestGateway()
+	g.health = proxy.NewHealth()
+	g.log = slog.New(slog.NewTextHandler(io.Discard, nil))
+	rt := &route{caller: &caller{snap: s, user: &User{ID: "u1"}, key: &Key{}, plan: &Plan{}}, name: "m", body: []byte(`{}`),
+		members: []Member{{Provider: "claude", Model: "m"}}}
+	g.sticky["u1|claude"] = "a1" // no persistence in this test
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", nil)
+	for k, v := range map[string]string{
+		"User-Agent": "Mozilla/5.0 Chrome/140", "Origin": "https://qanat.example", "Referer": "https://qanat.example/admin/playground",
+		"Sec-Fetch-Mode": "cors", "Sec-Ch-Ua": `"Chromium"`, "Accept-Language": "en-US",
+	} {
+		r.Header.Set(k, v)
+	}
+	g.forward(w, r, rt, forwardOpts{reqID: "r", start: time.Now(), remaining: -1})
+	if w.Code != 200 {
+		t.Fatalf("status %d: %s", w.Code, w.Body)
+	}
+	if ua := got.Get("User-Agent"); !strings.HasPrefix(ua, "claude-cli/") {
+		t.Fatalf("a subscription account must be called as the CLI, got UA %q", ua)
+	}
+	for _, h := range []string{"Origin", "Referer", "Sec-Fetch-Mode", "Sec-Ch-Ua", "Accept-Language"} {
+		if got.Get(h) != "" {
+			t.Errorf("browser header %s reached the provider: %v", h, got)
+		}
 	}
 }
