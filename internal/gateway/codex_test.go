@@ -36,10 +36,10 @@ func TestForward_Codex(t *testing.T) {
 	g := newTestGateway()
 	g.health = proxy.NewHealth()
 	g.log = slog.New(slog.NewTextHandler(io.Discard, nil))
-	body := []byte(`{"model":"gpt-6-sol-high","stream":true,"max_tokens":100,"messages":[{"role":"user","content":"hello"}]}`)
+	body := []byte(`{"model":"gpt-6-sol","stream":true,"max_tokens":100,"messages":[{"role":"user","content":"hello"}]}`)
 	_, ms, me, _ := protocol.ModelName(body)
-	rt := &route{caller: &caller{snap: s, user: &User{ID: "u1"}, key: &Key{}, plan: &Plan{}}, name: "cx/gpt-6-sol-high", body: body,
-		mStart: ms, mEnd: me, members: []Member{{Provider: "codex", Model: "gpt-6-sol-high"}}}
+	rt := &route{caller: &caller{snap: s, user: &User{ID: "u1"}, key: &Key{}, plan: &Plan{}}, name: "cx/gpt-6-sol", body: body,
+		mStart: ms, mEnd: me, members: []Member{{Provider: "codex", Model: "gpt-6-sol"}}}
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
@@ -55,7 +55,7 @@ func TestForward_Codex(t *testing.T) {
 	if got.body["model"] != "gpt-6-sol" || got.body["stream"] != true || got.body["store"] != false {
 		t.Fatalf("upstream body: %v", got.body)
 	}
-	if n := counterValue(upstreamResponses.WithLabelValues("codex", "cx1", "gpt-6-sol-high", "200")); n != 1 {
+	if n := counterValue(upstreamResponses.WithLabelValues("codex", "cx1", "gpt-6-sol", "200")); n != 1 {
 		t.Fatalf("codex response counted %v times", n)
 	}
 }
