@@ -1006,9 +1006,9 @@ components:
         redirect_uri: { type: string }
     OAuthExchangeRequest:
       type: object
-      required: [code, redirect_uri]
       properties:
         code: { type: string, description: The authorization code; may still carry "#state" the way Claude's redirect does }
+        refresh_token: { type: string, description: "Instead of code: a refresh token the official client already holds (or JSON carrying it); redirect_uri and state are then not needed" }
         state: { type: string, description: Empty when the state rode in as a "#fragment" on the code }
         redirect_uri: { type: string }
     OAuthExchangeResult:
