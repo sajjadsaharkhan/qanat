@@ -190,7 +190,7 @@ func oauthCredentialsJSON(t *oauth.Tokens) []byte {
 // loopback address — the shape the official clients use. A flow with a fixed
 // redirect (Codex) ignores the dashboard's.
 func validRedirectURI(f *oauth.Flow, raw string) bool {
-	if f.RedirectURI != "" {
+	if f.RedirectURI != "" || (f.ManualRedirectURI != "" && raw == f.ManualRedirectURI) {
 		return true
 	}
 	u, err := url.Parse(raw)
