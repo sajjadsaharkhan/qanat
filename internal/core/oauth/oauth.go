@@ -37,6 +37,10 @@ type Flow struct {
 	// accepts (Codex's loopback port); it replaces the dashboard's /callback
 	// and the admin pastes the address the browser lands on.
 	RedirectURI string
+	// ManualRedirectURI, when set, is a second redirect the client accepts
+	// that shows the code on a page instead of reaching the dashboard (agy's
+	// remote sign-in): the admin finishes on another device and pastes it.
+	ManualRedirectURI string
 	// AuthorizeExtra are added to the authorize URL's query.
 	AuthorizeExtra url.Values
 	// AuthorizeSuffix is appended to the authorize URL as is (Claude's
