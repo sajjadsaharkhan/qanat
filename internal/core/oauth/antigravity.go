@@ -48,13 +48,12 @@ var antigravity = &Flow{
 		"https://www.googleapis.com/auth/cclog",
 		"https://www.googleapis.com/auth/experimentsandconfigs",
 	}, " "),
-	CallbackPath: "/callback",
-	// agy's remote (out-of-band) sign-in lands here and shows the code.
+	CallbackPath:      "/callback",
 	ManualRedirectURI: "https://antigravity.google/oauth-callback",
-	AuthorizeExtra:  url.Values{"access_type": {"offline"}, "prompt": {"consent"}},
-	ProfileURL:      "https://www.googleapis.com/oauth2/v1/userinfo",
-	tokensEncoding:  "form",
-	refreshEncoding: "application/x-www-form-urlencoded",
+	AuthorizeExtra:    url.Values{"access_type": {"offline"}, "prompt": {"consent"}},
+	ProfileURL:        "https://www.googleapis.com/oauth2/v1/userinfo",
+	tokensEncoding:    "form",
+	refreshEncoding:   "application/x-www-form-urlencoded",
 	refreshBody: func(f *Flow, refreshToken string) ([]byte, error) {
 		return []byte(url.Values{
 			"grant_type": {"refresh_token"}, "refresh_token": {refreshToken},
