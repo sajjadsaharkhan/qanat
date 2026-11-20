@@ -37,10 +37,6 @@ type Flow struct {
 	// accepts (Codex's loopback port); it replaces the dashboard's /callback
 	// and the admin pastes the address the browser lands on.
 	RedirectURI string
-	// ManualRedirectURI, when set, is a second redirect the client accepts
-	// that shows the code on a page instead of reaching the dashboard (agy's
-	// remote sign-in): the admin finishes on another device and pastes it.
-	ManualRedirectURI string
 	// AuthorizeExtra are added to the authorize URL's query.
 	AuthorizeExtra url.Values
 	// AuthorizeSuffix is appended to the authorize URL as is (Claude's
@@ -219,6 +215,34 @@ func (f *Flow) Exchange(ctx context.Context, hc *http.Client, code, state, redir
 	t, err := f.postToken(ctx, hc, body, ct)
 	if err != nil {
 		return nil, err
+	}
+	if f.PostExchange != nil {
+		f.PostExchange(ctx, hc, t)
+	}
+	return t, nil
+}
+
+// Import signs in from a refresh token the official client already holds
+// (agy's saved login): it is refreshed once for an access token, then runs
+// the same post-exchange lookups as a sign-in. Pasted JSON carrying a
+// "refresh_token" field works too.
+func (f *Flow) Import(ctx context.Context, hc *http.Client, pasted string) (*Tokens, error) {
+	rt := strings.TrimSpace(pasted)
+	if strings.HasPrefix(rt, "{") {
+		var j struct {
+			RefreshToken string `json:"refresh_token"`
+		}
+		if json.Unmarshal([]byte(rt), &j) != nil || j.RefreshToken == "" {
+			return nil, fmt.Errorf("no refresh_token in the pasted JSON")
+		}
+		rt = j.RefreshToken
+	}
+	t, err := f.Refresh(ctx, hc, rt)
+	if err != nil {
+		return nil, err
+	}
+	if t.RefreshToken == "" {
+		t.RefreshToken = rt
 	}
 	if f.PostExchange != nil {
 		f.PostExchange(ctx, hc, t)

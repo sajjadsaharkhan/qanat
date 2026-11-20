@@ -24,7 +24,7 @@ func translate(t *testing.T, body, model string) (responsesRequest, *Request) {
 }
 
 func TestTranslate_ConversationToolsAndReasoning(t *testing.T) {
-	body := `{"model":"gpt-6-sol","max_tokens":32000,"temperature":1,"stream":true,
+	body := `{"model":"gpt-6-sol","max_tokens":32000,"temperature":1,"stream":true,"output_config":{"effort":"high"},
 	 "system":[{"type":"text","text":"You are Claude Code."},{"type":"text","text":"Be brief."}],
 	 "tools":[{"name":"Read","description":"read a file","input_schema":{"type":"object"}},{"type":"web_search_20250305","name":"web_search"}],
 	 "tool_choice":{"type":"tool","name":"Read"},
@@ -38,10 +38,10 @@ func TestTranslate_ConversationToolsAndReasoning(t *testing.T) {
 	  {"role":"user","content":[
 	    {"type":"tool_result","tool_use_id":"call_1","content":[{"type":"text","text":"package a"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAA"}}]},
 	    {"type":"text","text":"now explain"}]}]}`
-	r, tr := translate(t, body, "gpt-6-sol-high")
+	r, tr := translate(t, body, "gpt-6-sol")
 
 	if r.Model != "gpt-6-sol" || r.Reasoning == nil || r.Reasoning.Effort != "high" || r.Reasoning.Summary != "auto" {
-		t.Fatalf("model/effort from the name suffix: %s %+v", r.Model, r.Reasoning)
+		t.Fatalf("model/effort from Claude Code's effort: %s %+v", r.Model, r.Reasoning)
 	}
 	if r.Instructions != "You are Claude Code.\n\nBe brief." || !r.Stream || r.Store || r.PromptCacheKey != "s1" {
 		t.Fatalf("instructions/stream/store/cache key: %+v", r)
@@ -101,9 +101,6 @@ func TestTranslate_EffortFallbacks(t *testing.T) {
 		if len(r.Input) != 1 || r.Instructions == "" {
 			t.Errorf("%s: empty input and instructions get stand-ins: %+v", body, r)
 		}
-	}
-	if r, _ := translate(t, `{"messages":[]}`, "gpt-6-sol-none"); r.Include != nil || r.Reasoning.Summary != "" {
-		t.Errorf("effort none asks for no reasoning output: %+v", r)
 	}
 }
 

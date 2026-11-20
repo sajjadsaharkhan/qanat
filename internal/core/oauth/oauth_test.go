@@ -177,3 +177,25 @@ func TestRefreshClaude(t *testing.T) {
 		t.Fatalf("refresh body: %v", seen)
 	}
 }
+
+func TestImportRefreshToken(t *testing.T) {
+	var seen map[string]any
+	srv := tokenServer(t, 200, `{"access_token":"a2","expires_in":3600}`, &seen) // provider keeps the same refresh token
+	defer srv.Close()
+	orig := *claude
+	claude.TokenURL = srv.URL
+	t.Cleanup(func() { *claude = orig })
+
+	for _, pasted := range []string{"rt1", ` {"refresh_token":"rt1"} `} {
+		toks, err := claude.Import(context.Background(), srv.Client(), pasted)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if toks.AccessToken != "a2" || toks.RefreshToken != "rt1" || seen["refresh_token"] != "rt1" {
+			t.Fatalf("%q: tokens %+v, body %v", pasted, toks, seen)
+		}
+	}
+	if _, err := claude.Import(context.Background(), srv.Client(), `{"x":1}`); err == nil {
+		t.Fatal("JSON without refresh_token must fail")
+	}
+}

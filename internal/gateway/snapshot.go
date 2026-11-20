@@ -52,7 +52,10 @@ type Key struct {
 }
 
 // User is what admission needs about a person.
-type User struct{ ID, PlanID string }
+type User struct {
+	ID, PlanID string
+	Admin      bool // may pin an account and read routing details (the dashboard's Playground)
+}
 
 // Plan is a Plan in hot-path form (REQ-PLAN-02).
 type Plan struct {
@@ -275,7 +278,7 @@ func build(ctx context.Context, q *db.Queries, box *secretbox.Box, log *slog.Log
 		return nil, err
 	}
 	for _, u := range users {
-		s.users[u.ID] = &User{ID: u.ID, PlanID: u.PlanID}
+		s.users[u.ID] = &User{ID: u.ID, PlanID: u.PlanID, Admin: u.Role == "admin"}
 	}
 
 	plans, err := q.SnapshotPlans(ctx)

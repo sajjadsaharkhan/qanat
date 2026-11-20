@@ -40,8 +40,8 @@ const signInWith: Partial<Record<string, string>> = { claude: "", codex: "ChatGP
  */
 const pasteOnly = new Set(["codex"]);
 
-/** agy's remote sign-in redirect: the page shows the code to paste, so it works from a phone. */
-const manualRedirect: Record<string, string> = { antigravity: "https://antigravity.google/oauth-callback" };
+/** Providers whose existing login (agy's) can be imported by pasting its refresh token. */
+const tokenImport = new Set(["antigravity"]);
 
 /** Credential kinds offered per provider, in menu order. */
 const kindOptions: Partial<Record<string, { value: AuthKind; label: string }[]>> = {
@@ -119,8 +119,7 @@ function callbackRedirectUri(): string {
  */
 function OAuthSignIn({ provider, providerName, onDone }: { provider: string; providerName: string; onDone: () => void }) {
   const identity = signInWith[provider] || providerName;
-  const [remote, setRemote] = useState(false);
-  const paste = pasteOnly.has(provider) || remote;
+  const paste = pasteOnly.has(provider);
   const qc = useQueryClient();
   const { mutate: exchangeMutate, isPending: exchanging, error: exchangeError } = api.useMutation(
     "post",
@@ -130,11 +129,12 @@ function OAuthSignIn({ provider, providerName, onDone }: { provider: string; pro
   const [starting, setStarting] = useState(false);
   const [pending, setPending] = useState<{ state: string; redirectUri: string; authUrl: string } | null>(null);
   const [manualUrl, setManualUrl] = useState("");
+  const [refreshToken, setRefreshToken] = useState("");
 
   const connect = useCallback(
-    (code: string, state: string, redirectUri: string) => {
+    (body: Schemas["OAuthExchangeRequest"]) => {
       exchangeMutate(
-        { params: { path: { provider: provider as ProviderID } }, body: { code, state, redirect_uri: redirectUri } },
+        { params: { path: { provider: provider as ProviderID } }, body },
         {
           onSuccess: (res) => {
             qc.invalidateQueries({ queryKey: ["get", "/api/admin/accounts"] });
@@ -154,7 +154,7 @@ function OAuthSignIn({ provider, providerName, onDone }: { provider: string; pro
     const finish = (code: string, state: string) => {
       if (done) return;
       done = true;
-      connect(code, state, pending.redirectUri);
+      connect({ code, state, redirect_uri: pending.redirectUri });
     };
     const onRelay = (ev: MessageEvent) => {
       const d = ev.data as Partial<Relay>;
@@ -176,19 +176,17 @@ function OAuthSignIn({ provider, providerName, onDone }: { provider: string; pro
 
   const redirectUri = useMemo(() => callbackRedirectUri(), []);
 
-  const start = async (isRemote = false) => {
+  const start = async () => {
     setStarting(true);
-    setRemote(isRemote);
     try {
       const { data, error } = await fetchClient.GET("/api/admin/accounts/oauth/{provider}/authorize", {
-        params: { path: { provider: provider as ProviderID }, query: { redirect_uri: (isRemote && manualRedirect[provider]) || redirectUri } },
+        params: { path: { provider: provider as ProviderID }, query: { redirect_uri: redirectUri } },
       });
       if (error) {
         toast.error(errorMessage(error));
         return;
       }
       setPending({ state: data.state, redirectUri: data.redirect_uri, authUrl: data.auth_url });
-      if (isRemote) return; // open the copied URL on any device (a phone works)
       const popup = window.open(data.auth_url, "qanat-oauth", "width=600,height=700");
       if (!popup) toast.error("The sign-in popup was blocked — open the URL below manually.");
     } finally {
@@ -206,16 +204,17 @@ function OAuthSignIn({ provider, providerName, onDone }: { provider: string; pro
       code = u.searchParams.get("code") ?? "";
       state = u.searchParams.get("state") ?? (u.hash.length > 1 ? decodeURIComponent(u.hash.slice(1)) : "");
     } catch {
-      // not a URL: the bare code the remote sign-in page shows
-      code = raw;
-      state = pending?.state ?? "";
+      toast.error("Paste the full URL the provider redirected to.");
+      return;
     }
     if (!code) {
       toast.error("That URL has no authorization code in it.");
       return;
     }
-    connect(code, state, pending?.redirectUri ?? redirectUri);
+    connect({ code, state, redirect_uri: pending?.redirectUri ?? redirectUri });
   };
+
+  const importToken = () => connect({ refresh_token: refreshToken.trim() });
 
   return (
     <div className="flex flex-col gap-3">
@@ -223,11 +222,7 @@ function OAuthSignIn({ provider, providerName, onDone }: { provider: string; pro
         Signs in through {providerName}&apos;s own OAuth flow — the same one the official client uses. The tokens are sealed with the master
         key and refreshed by Qanat.
       </p>
-      {pending && remote ? (
-        <p className="text-sm text-muted-foreground">
-          Open the copied URL on any device (your phone works), sign in, then paste the authorization code — or the page&apos;s full address — below.
-        </p>
-      ) : pending && paste ? (
+      {pending && paste ? (
         <p className="text-sm text-muted-foreground">
           Complete the sign-in in the popup. It ends on a <code className="font-mono">localhost:1455</code> page that won&apos;t load — that&apos;s
           expected. Copy that page&apos;s full address and paste it below.
@@ -237,17 +232,34 @@ function OAuthSignIn({ provider, providerName, onDone }: { provider: string; pro
           <Loader2 aria-hidden className="size-4 animate-spin" /> Waiting for {identity}… complete the sign-in in the popup.
         </p>
       ) : null}
-      <div className="flex flex-wrap gap-2">
-        <Button type="button" onClick={() => start()} disabled={starting || exchanging}>
-          {starting ? <Loader2 aria-hidden className="me-1.5 size-4 animate-spin" /> : <ExternalLink aria-hidden className="me-1.5 size-4" />}
-          Sign in with {identity}
-        </Button>
-        {manualRedirect[provider] && (
-          <Button type="button" variant="outline" onClick={() => start(true)} disabled={starting || exchanging}>
-            Sign in on another device
-          </Button>
-        )}
-      </div>
+      <Button type="button" onClick={start} disabled={starting || exchanging} className="self-start">
+        {starting ? <Loader2 aria-hidden className="me-1.5 size-4 animate-spin" /> : <ExternalLink aria-hidden className="me-1.5 size-4" />}
+        Sign in with {identity}
+      </Button>
+      {tokenImport.has(provider) && (
+        <div className="flex flex-col gap-2 rounded-lg border px-3 py-2.5">
+          <p className="text-xs text-muted-foreground">
+            Already signed in with <code className="font-mono">agy</code>? Paste its refresh token (or the saved token JSON) instead.
+          </p>
+          <div className="flex items-end gap-2">
+            <div className="flex flex-1 flex-col gap-1.5">
+              <Label htmlFor="oauth-refresh-token">Refresh token</Label>
+              <Input
+                id="oauth-refresh-token"
+                type="password"
+                value={refreshToken}
+                onChange={(e) => setRefreshToken(e.target.value)}
+                placeholder="1//…"
+                autoComplete="off"
+              />
+            </div>
+            <Button type="button" variant="outline" onClick={importToken} disabled={!refreshToken.trim() || exchanging}>
+              {exchanging ? <Loader2 aria-hidden className="me-1.5 size-4 animate-spin" /> : null}
+              Import
+            </Button>
+          </div>
+        </div>
+      )}
       {pending && (
         <div className="flex flex-col gap-2 rounded-lg border px-3 py-2.5">
           <p className="text-xs text-muted-foreground">
@@ -262,7 +274,7 @@ function OAuthSignIn({ provider, providerName, onDone }: { provider: string; pro
           </div>
           <div className="flex items-end gap-2">
             <div className="flex flex-1 flex-col gap-1.5">
-              <Label htmlFor="oauth-paste">{remote ? "Authorization code or URL" : "Redirect URL"}</Label>
+              <Label htmlFor="oauth-paste">Redirect URL</Label>
               <Input
                 id="oauth-paste"
                 value={manualUrl}

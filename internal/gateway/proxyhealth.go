@@ -5,12 +5,17 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptrace"
+	"sync/atomic"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 
 	"qanat/internal/proxy"
 )
+
+// connectKey carries forward's *atomic.Int64 to withConnectTrace: the time the
+// last new upstream connection took, in microseconds.
+type connectKey struct{}
 
 func proxyLabel(sp *proxy.Spec) string {
 	if sp == nil {
@@ -22,12 +27,16 @@ func proxyLabel(sp *proxy.Spec) string {
 // withConnectTrace observes how long a new upstream connection takes
 // (REQ-PROXY-06). Reused connections cost nothing and are not observed.
 func withConnectTrace(req *http.Request, sp *proxy.Spec) *http.Request {
+	connect, _ := req.Context().Value(connectKey{}).(*atomic.Int64) // set by forward for the Playground's timings
 	var start time.Time
 	trace := &httptrace.ClientTrace{
 		GetConn: func(string) { start = time.Now() },
 		GotConn: func(info httptrace.GotConnInfo) {
 			if !info.Reused && !start.IsZero() {
 				proxyConnect.WithLabelValues(proxyLabel(sp)).Observe(time.Since(start).Seconds())
+				if connect != nil {
+					connect.Store(time.Since(start).Microseconds())
+				}
 			}
 		},
 	}

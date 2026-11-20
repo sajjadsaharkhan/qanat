@@ -8,6 +8,7 @@ import {
   LogOut,
   Network,
   Radar,
+  FlaskConical,
   ScrollText,
   Server,
   Shapes,
@@ -79,6 +80,7 @@ const adminNav: { label: string; items: NavItem[] }[] = [
   {
     label: "Operations",
     items: [
+      { href: "/admin/playground", label: "Playground", icon: FlaskConical },
       { href: "/admin/audit", label: "Audit log", icon: ScrollText },
     ],
   },

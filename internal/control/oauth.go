@@ -78,6 +78,9 @@ type oauthExchangeRequest struct {
 	Code        string `json:"code"`
 	State       string `json:"state"`
 	RedirectURI string `json:"redirect_uri"`
+	// RefreshToken replaces the code flow: a token the official client
+	// already holds (or JSON carrying it) is imported as is.
+	RefreshToken string `json:"refresh_token"`
 }
 
 // oauthExchange finishes a sign-in: it swaps the code for tokens, seals them,
@@ -94,28 +97,38 @@ func (s *Server) oauthExchange(w http.ResponseWriter, r *http.Request, actor *db
 	if !decode(w, r, &req) {
 		return
 	}
-	if req.State == "" { // Claude may deliver the state as "#fragment" on the code
-		if i := strings.IndexByte(req.Code, '#'); i >= 0 {
-			req.State = req.Code[i+1:]
+	var tokens *oauth.Tokens
+	var err error
+	if req.RefreshToken != "" {
+		tokens, err = f.Import(r.Context(), oauthHTTPClient, req.RefreshToken)
+		if err != nil {
+			fail(w, http.StatusBadGateway, "oauth_exchange_failed", "The provider refused that token: "+err.Error())
+			return
 		}
-	}
-	s.oauthMu.Lock()
-	entry, ok := s.oauthPending[req.State]
-	if ok {
-		delete(s.oauthPending, req.State)
-	}
-	s.oauthMu.Unlock()
-	if !ok || entry.pending.Provider != providerID || entry.pending.RedirectURI != req.RedirectURI {
-		fail(w, http.StatusBadRequest, "unknown_state",
-			"This sign-in can't be matched to a started one. Open the sign-in again.")
-		return
-	}
+	} else {
+		if req.State == "" { // Claude may deliver the state as "#fragment" on the code
+			if i := strings.IndexByte(req.Code, '#'); i >= 0 {
+				req.State = req.Code[i+1:]
+			}
+		}
+		s.oauthMu.Lock()
+		entry, ok := s.oauthPending[req.State]
+		if ok {
+			delete(s.oauthPending, req.State)
+		}
+		s.oauthMu.Unlock()
+		if !ok || entry.pending.Provider != providerID || entry.pending.RedirectURI != req.RedirectURI {
+			fail(w, http.StatusBadRequest, "unknown_state",
+				"This sign-in can't be matched to a started one. Open the sign-in again.")
+			return
+		}
 
-	tokens, err := f.Exchange(r.Context(), oauthHTTPClient, req.Code, req.State, req.RedirectURI, entry.pending)
-	if err != nil {
-		fail(w, http.StatusBadGateway, "oauth_exchange_failed",
-			"The provider refused the sign-in: "+err.Error())
-		return
+		tokens, err = f.Exchange(r.Context(), oauthHTTPClient, req.Code, req.State, req.RedirectURI, entry.pending)
+		if err != nil {
+			fail(w, http.StatusBadGateway, "oauth_exchange_failed",
+				"The provider refused the sign-in: "+err.Error())
+			return
+		}
 	}
 	if s.opts.Box == nil {
 		fail(w, http.StatusConflict, "no_master_key", "Credentials can't be stored until QANAT_MASTER_KEY is set on the server.")
@@ -190,7 +203,7 @@ func oauthCredentialsJSON(t *oauth.Tokens) []byte {
 // loopback address — the shape the official clients use. A flow with a fixed
 // redirect (Codex) ignores the dashboard's.
 func validRedirectURI(f *oauth.Flow, raw string) bool {
-	if f.RedirectURI != "" || (f.ManualRedirectURI != "" && raw == f.ManualRedirectURI) {
+	if f.RedirectURI != "" {
 		return true
 	}
 	u, err := url.Parse(raw)

@@ -12,7 +12,7 @@ import (
 
 // Options are what a request needs besides its body.
 type Options struct {
-	Model   string // upstream model as routed, e.g. "gpt-6-sol" or "gpt-6-sol-high"
+	Model   string // upstream model as routed, e.g. "gpt-6-sol"
 	Session string // stable per conversation: the backend's prompt cache key
 }
 
@@ -27,20 +27,6 @@ type Request struct {
 // item's encrypted_content, so only those go back upstream (REQ-STREAM-04);
 // a Claude or Gemini signature would fail the backend's decryption.
 const signaturePrefix = "codex:"
-
-// efforts are the reasoning levels a model name may end in.
-var efforts = []string{"none", "minimal", "low", "medium", "high", "xhigh"}
-
-// Upstream splits "gpt-6-sol-high" into the model and the effort its name
-// implies ("" when none).
-func Upstream(model string) (id, effort string) {
-	for _, e := range efforts {
-		if s, ok := strings.CutSuffix(model, "-"+e); ok {
-			return s, e
-		}
-	}
-	return model, ""
-}
 
 // Anthropic request, the fields that carry over. max_tokens and the sampling
 // knobs have no Codex form: the backend rejects them.
@@ -161,10 +147,9 @@ func Translate(body []byte, o Options) (*Request, error) {
 	if err := json.Unmarshal(body, &in); err != nil {
 		return nil, err
 	}
-	model, effort := Upstream(o.Model)
 	out := &Request{Stream: in.Stream, Tools: map[string]string{}}
 	r := responsesRequest{
-		Model: model, Instructions: texts(in.System), Store: false, Stream: true,
+		Model: o.Model, Instructions: texts(in.System), Store: false, Stream: true,
 		PromptCacheKey: o.Session,
 	}
 	if r.Instructions == "" {
@@ -205,22 +190,15 @@ func Translate(body []byte, o Options) (*Request, error) {
 	}
 	r.Input = input
 
-	if e := pickEffort(in, effort); e != "none" {
-		r.Reasoning = &reasoning{Effort: e, Summary: "auto"}
-		r.Include = []string{"reasoning.encrypted_content"}
-	} else {
-		r.Reasoning = &reasoning{Effort: e}
-	}
+	r.Reasoning = &reasoning{Effort: pickEffort(in), Summary: "auto"}
+	r.Include = []string{"reasoning.encrypted_content"}
 	out.Body, err = json.Marshal(r)
 	return out, err
 }
 
-// pickEffort: the model name's level, else Claude Code's effort, else its
-// thinking budget, else medium.
-func pickEffort(in msgRequest, fromName string) string {
-	if fromName != "" {
-		return fromName
-	}
+// pickEffort is Claude Code's effort (/effort, which it sends for every
+// model), else its thinking budget, else medium. Codex tops out at xhigh.
+func pickEffort(in msgRequest) string {
 	if oc := in.OutputConfig; oc != nil && oc.Effort != "" {
 		switch e := strings.ToLower(oc.Effort); e {
 		case "max":

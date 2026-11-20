@@ -377,3 +377,50 @@ func counterValue(c prometheus.Counter) float64 {
 	c.Write(&m)
 	return m.GetCounter().GetValue()
 }
+
+// The Playground: an admin's X-Qanat-Account pins one account (even one that
+// would sit out as first choice) and the response says where it went; the same
+// header from a regular user is ignored and no routing details leak.
+func TestForward_AdminPinsAccount(t *testing.T) {
+	hit := map[string]int{}
+	mk := func(id string) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			hit[id]++
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, `{"usage":{}}`)
+		}))
+	}
+	up1, up2 := mk("a1"), mk("a2")
+	defer up1.Close()
+	defer up2.Close()
+	s := &Snapshot{Gen: 1, accounts: map[string][]*Account{"claude": {
+		{ID: "a1", Provider: "claude", State: "healthy", BaseURL: up1.URL, Origin: up1.URL, Proxies: []*proxy.Spec{nil}},
+		{ID: "a2", Provider: "claude", State: "healthy", BaseURL: up2.URL, Origin: up2.URL, Proxies: []*proxy.Spec{nil}},
+	}}, sticky: map[string]string{}}
+
+	run := func(admin bool) *httptest.ResponseRecorder {
+		g := newTestGateway()
+		g.health = proxy.NewHealth()
+		g.log = slog.New(slog.NewTextHandler(io.Discard, nil))
+		rt := &route{caller: &caller{snap: s, user: &User{ID: "u1", Admin: admin}, key: &Key{}, plan: &Plan{}}, name: "m", body: []byte(`{}`),
+			members: []Member{{Provider: "claude", Model: "m"}}}
+		g.sticky["u1|claude"] = "a1" // no persistence in this test
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", nil)
+		r.Header.Set("X-Qanat-Account", "a2")
+		g.forward(w, r, rt, forwardOpts{reqID: "r", start: time.Now(), remaining: -1})
+		return w
+	}
+
+	w := run(true)
+	if w.Code != 200 || hit["a2"] != 1 || hit["a1"] != 0 {
+		t.Fatalf("admin pin: status %d, hits %v", w.Code, hit)
+	}
+	if h := w.Header(); h.Get("X-Qanat-Account") != "a2" || h.Get("X-Qanat-Proxy") != "direct" || h.Get("X-Qanat-Gateway-Ms") == "" || h.Get("X-Qanat-Upstream-Ms") == "" {
+		t.Fatalf("routing headers: %v", h)
+	}
+	w = run(false)
+	if hit["a1"] != 1 || w.Header().Get("X-Qanat-Account") != "" {
+		t.Fatalf("a regular user must not pin or see routing: hits %v, %v", hit, w.Header())
+	}
+}

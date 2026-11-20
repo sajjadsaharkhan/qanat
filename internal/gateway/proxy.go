@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"qanat/internal/core/netstats"
@@ -32,6 +33,7 @@ var dropRequest = map[string]bool{
 	"Content-Length": true, "Accept-Encoding": true,
 	"Authorization": true, "X-Api-Key": true, "Cookie": true,
 	"X-Forwarded-For": true, "X-Forwarded-Proto": true, "X-Forwarded-Host": true, "X-Real-Ip": true, "Forwarded": true,
+	"X-Qanat-Account": true,
 }
 
 // Response headers not passed back: hop-by-hop and account-scoped cookies.
@@ -147,6 +149,15 @@ func (g *Gateway) forward(w http.ResponseWriter, r *http.Request, rt *route, o f
 	}
 	var unsupported []string
 	tried := 0
+	// An admin's request may pin one account (the Playground tests accounts
+	// one by one); other callers' header is ignored. The connect time of the
+	// upstream attempt is read back through the context, in microseconds.
+	pin := ""
+	if rt.user.Admin {
+		pin = r.Header.Get("X-Qanat-Account")
+	}
+	connect := new(atomic.Int64)
+	r = r.WithContext(context.WithValue(r.Context(), connectKey{}, connect))
 	for _, m := range rt.members {
 		if _, ok := defaultBaseURL[m.Provider]; !ok {
 			unsupported = append(unsupported, m.Provider)
@@ -156,8 +167,15 @@ func (g *Gateway) forward(w http.ResponseWriter, r *http.Request, rt *route, o f
 		if m.Model != rt.name { // REQ-PASS-03: only the model value changes
 			body = protocol.ReplaceRange(rt.body, rt.mStart, rt.mEnd, m.Model)
 		}
-		for _, a := range g.order(r.Context(), rt, m.Provider, g.candidates(rt.snap, rt.user.ID, m.Provider)) {
+		accounts := g.candidates(rt.snap, rt.user.ID, m.Provider)
+		if pin != "" {
+			accounts = g.pinned(rt.snap, m.Provider, pin)
+		} else {
+			accounts = g.order(r.Context(), rt, m.Provider, accounts)
+		}
+		for _, a := range accounts {
 			tried++
+			connect.Store(-1)
 			attempt := time.Now()
 			// A failover group's next member is tried before the next account
 			// (REQ-PROXY-03); nothing has reached the client yet.
@@ -207,6 +225,9 @@ func (g *Gateway) forward(w http.ResponseWriter, r *http.Request, rt *route, o f
 				continue
 			}
 			g.served(rt, m.Provider, a.ID)
+			if rt.user.Admin {
+				routingHeaders(w.Header(), m, a, sp, o.start, attempt, connect.Load())
+			}
 			g.stream(w, r, rt, o, m, a, sp, resp, attempt, endpoint)
 			return
 		}
@@ -237,6 +258,35 @@ func (g *Gateway) forward(w http.ResponseWriter, r *http.Request, rt *route, o f
 			seen[m.Provider] = true
 			g.net.record(m.Provider, netstats.Event{Model: m.Model, Status: 529, Outcome: netstats.Rejected, Reason: "pool_exhausted"})
 		}
+	}
+}
+
+// pinned is the one account the Playground asked for: it must belong to the
+// provider and be usable, but a cooldown doesn't exclude it (the point is to
+// see how that account behaves).
+func (g *Gateway) pinned(s *Snapshot, provider, id string) []*Account {
+	for _, a := range s.accounts[provider] {
+		if a.ID == id && !a.Disabled && a.State != "disconnected" && len(g.routes(a)) > 0 {
+			return []*Account{a}
+		}
+	}
+	return nil
+}
+
+// routingHeaders tells an admin where a request went and what each leg cost:
+// the gateway's own work before the upstream call, the upstream's time to
+// response headers, and the time a new connection took (through the proxy, if
+// any). Everything is in milliseconds; connect is absent on a reused connection.
+func routingHeaders(h http.Header, m Member, a *Account, sp *proxy.Spec, start, attempt time.Time, connectUS int64) {
+	ms := func(d time.Duration) string { return strconv.FormatFloat(float64(d.Microseconds())/1000, 'f', 1, 64) }
+	h.Set("X-Qanat-Account", a.ID)
+	h.Set("X-Qanat-Provider", m.Provider)
+	h.Set("X-Qanat-Upstream-Model", m.Model)
+	h.Set("X-Qanat-Proxy", proxyLabel(sp))
+	h.Set("X-Qanat-Gateway-Ms", ms(attempt.Sub(start)))
+	h.Set("X-Qanat-Upstream-Ms", ms(time.Since(attempt)))
+	if connectUS >= 0 {
+		h.Set("X-Qanat-Connect-Ms", ms(time.Duration(connectUS)*time.Microsecond))
 	}
 }
 

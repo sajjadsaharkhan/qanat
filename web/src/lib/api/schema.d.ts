@@ -1275,10 +1275,12 @@ export interface components {
         };
         OAuthExchangeRequest: {
             /** @description The authorization code; may still carry "#state" the way Claude's redirect does */
-            code: string;
+            code?: string;
+            /** @description Instead of code: a refresh token the official client already holds (or JSON carrying it); redirect_uri and state are then not needed */
+            refresh_token?: string;
             /** @description Empty when the state rode in as a "#fragment" on the code */
             state?: string;
-            redirect_uri: string;
+            redirect_uri?: string;
         };
         OAuthExchangeResult: {
             /** @description The account ID */
